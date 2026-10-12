@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+dist-electron/
+dist-renderer/
+release/
+.impeccable/review/
+.impeccable/*.png
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/hook.pending.json
+.impeccable/mocks/

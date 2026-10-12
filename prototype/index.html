@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>素记 Plainote · 界面原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="titlebar">
+      <div class="window-controls" aria-hidden="true"><i></i><i></i><i></i></div>
+      <span class="window-title">素记 <span>Plainote</span></span>
+      <div class="title-actions">
+        <button class="icon-button" id="toggle-left" title="显示或隐藏目录" aria-label="显示或隐藏目录" aria-expanded="true" data-icon="panel-left"></button>
+        <button class="icon-button" id="toggle-right" title="显示或隐藏辅助栏" aria-label="显示或隐藏辅助栏" aria-expanded="true" data-icon="panel-right"></button>
+        <div class="windows-controls" aria-hidden="true"><span data-icon="minimize"></span><span data-icon="maximize"></span><span data-icon="close"></span></div>
+      </div>
+    </header>
+    <div class="workspace">
+      <aside class="sidebar" aria-label="笔记库与文件">
+        <button class="vault-button" id="vault-switch"><span class="brand-mark" data-icon="book"></span><span><strong>工作笔记库</strong><small>本地笔记</small></span><span data-icon="chevrons"></span></button>
+        <button class="search-trigger" id="search-trigger"><span data-icon="search"></span><span>搜索笔记</span><kbd id="search-key">⌘ ⇧ F</kbd></button>
+        <button class="new-note" id="new-note"><span data-icon="plus"></span>新建笔记<span class="subtle-shortcut">⌘ N</span></button>
+        <div class="files-pane" id="files-pane">
+          <div class="section-label">常用</div>
+          <button class="file-row favorite" data-note="overview"><span data-icon="pin"></span><span>素记 · 项目概览</span></button>
+          <button class="file-row favorite" data-note="log"><span data-icon="calendar"></span><span>本周工作日志</span></button>
+          <div class="section-label files-label">文件 <button class="icon-button" id="collapse-folders" aria-label="折叠所有目录" title="折叠所有目录" data-icon="fold"></button></div>
+          <details open class="folder"><summary><span data-icon="chevron"></span><span data-icon="folder"></span>项目</summary>
+            <details open class="folder nested"><summary><span data-icon="chevron"></span><span data-icon="folder"></span>素记 Plainote</summary>
+              <button class="file-row nested-file" data-note="overview"><span data-icon="file"></span><span>项目概览</span></button>
+              <button class="file-row nested-file selected" data-note="meeting" aria-current="page"><span data-icon="file"></span><span>产品周会 · 10月12日</span></button>
+              <button class="file-row nested-file" data-note="design"><span data-icon="file"></span><span>界面设计原则</span></button>
+            </details>
+          </details>
+          <details class="folder"><summary><span data-icon="chevron"></span><span data-icon="folder"></span>会议记录</summary><button class="file-row indent" data-note="meeting"><span data-icon="file"></span><span>产品周会 · 10月12日</span></button></details>
+          <details class="folder"><summary><span data-icon="chevron"></span><span data-icon="folder"></span>工作日志</summary><button class="file-row indent" data-note="log"><span data-icon="file"></span><span>本周工作日志</span></button></details>
+          <details class="folder"><summary><span data-icon="chevron"></span><span data-icon="folder"></span>附件</summary><div class="folder-empty">图片与附件会保存在这里</div></details>
+          <div id="created-files"></div>
+        </div>
+        <section class="search-pane" id="search-pane" hidden>
+          <div class="search-heading"><strong>全文搜索</strong><button class="icon-button" id="close-search" aria-label="关闭搜索" data-icon="close"></button></div>
+          <label class="search-field"><span data-icon="search"></span><input id="full-search" placeholder="搜索正文或标题" aria-label="搜索正文或标题"></label>
+          <div class="search-caption" id="search-count"></div><div id="search-results"></div>
+        </section>
+        <footer class="sidebar-footer"><button class="icon-button" id="settings-button" title="设置" aria-label="设置" data-icon="settings"></button><button class="theme-button" id="theme-toggle"><span data-icon="moon"></span><span>深色模式</span></button></footer>
+      </aside>
+      <main class="editor-area">
+        <div class="tabs" role="tablist" aria-label="已打开笔记" id="tabs"></div>
+        <div class="editor-toolbar"><div class="breadcrumb"><span>项目</span><span data-icon="chevron"></span><span>素记 Plainote</span><span data-icon="chevron"></span><span id="breadcrumb-name">产品周会</span></div><div class="editor-actions"><button class="mode-button" id="source-toggle" aria-pressed="false"><span data-icon="code"></span><span>源码</span></button><button class="icon-button" id="note-menu" title="笔记操作" aria-label="笔记操作" data-icon="more"></button></div></div>
+        <div class="notice" id="notice" hidden></div>
+        <div class="document-scroll" id="document-scroll">
+          <div class="document-wrap">
+            <div class="note-meta"><span id="note-category">会议记录</span><span class="meta-dot"></span><span>2026年10月12日</span><span class="note-demo">示例笔记</span></div>
+            <article class="document" id="document" contenteditable="true" spellcheck="false" aria-label="笔记正文"></article>
+            <textarea class="source-editor" id="source-editor" aria-label="Markdown 源码" spellcheck="false" hidden></textarea>
+          </div>
+        </div>
+        <section class="welcome" id="welcome" hidden><span class="welcome-mark" data-icon="book"></span><h1>让笔记回到你手中。</h1><p>打开一个本地文件夹，从已有的 Markdown 笔记开始。</p><button class="primary-button" id="open-demo">打开示例笔记库</button><button class="text-button" id="new-vault">新建笔记库示例</button><small>界面演示，不会读取或修改电脑上的文件。</small></section>
+      </main>
+      <aside class="inspector" aria-label="笔记辅助信息">
+        <div class="inspector-tabs" role="tablist" aria-label="辅助信息"><button role="tab" aria-selected="true" id="outline-tab">大纲</button><button role="tab" aria-selected="false" id="backlinks-tab">反向链接 <span>2</span></button></div>
+        <nav class="outline" id="outline" aria-label="当前笔记大纲"></nav>
+        <div class="backlinks" id="backlinks" hidden><p class="inspector-caption">这些笔记引用了当前笔记</p><button class="backlink" data-note="overview"><span data-icon="file"></span><strong>项目概览</strong><small>本周的设计结论见产品周会记录。</small></button><button class="backlink" data-note="log"><span data-icon="file"></span><strong>本周工作日志</strong><small>周一：完成产品周会，明确界面方向。</small></button></div>
+        <div class="inspector-tip"><span data-icon="link"></span><p>用 <code>[[笔记名称]]</code><br>把相关工作连接起来。</p></div>
+      </aside>
+    </div>
+    <footer class="statusbar"><span class="save-status" id="save-status"><span data-icon="check"></span>已保存 · 演示</span><span class="prototype-label">界面原型 · 示例资料</span><div><span id="word-count"></span><button id="preview-mode">即时预览</button><button id="demo-states" title="查看首次使用与保存异常状态"><span data-icon="sliders"></span>演示状态</button></div></footer>
+  </div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+import { spawn } from 'node:child_process';
+import { createServer } from 'vite';
+const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+const build = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build:electron'], { stdio: 'inherit', env });
+const code = await new Promise(resolve => build.on('exit', resolve));
+if (code !== 0) process.exit(Number(code) || 1);
+const server = await createServer(); await server.listen();
+const { default: electron } = await import('electron');
+const child = spawn(electron, ['.'], { stdio: 'inherit', env: { ...env, PLAINOTE_DEV_URL: 'http://127.0.0.1:5173' } });
+const close = async () => { child.kill(); await server.close(); process.exit(0); };
+process.on('SIGINT', close); process.on('SIGTERM', close);
+child.on('exit', async () => { await server.close(); process.exit(0); });

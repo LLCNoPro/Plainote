@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-12T03:23:43.737915+00:00",
+  "title": "Design System: 素记 Plainote",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Teal"
+      },
+      "dark-accent": {
+        "role": "primary",
+        "displayName": "Dark teal"
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Soft teal"
+      },
+      "dark-accent-soft": {
+        "role": "primary",
+        "displayName": "Dark soft teal"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Warm paper"
+      },
+      "dark-surface": {
+        "role": "neutral",
+        "displayName": "Dark warm paper"
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "Warm gray"
+      },
+      "dark-sidebar": {
+        "role": "neutral",
+        "displayName": "Dark warm gray"
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised paper"
+      },
+      "dark-raised": {
+        "role": "neutral",
+        "displayName": "Dark raised paper"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Ink"
+      },
+      "dark-text": {
+        "role": "neutral",
+        "displayName": "Dark ink"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted ink"
+      },
+      "dark-muted": {
+        "role": "neutral",
+        "displayName": "Dark muted ink"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Fine divider"
+      },
+      "dark-line": {
+        "role": "neutral",
+        "displayName": "Dark fine divider"
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover wash"
+      },
+      "dark-hover": {
+        "role": "neutral",
+        "displayName": "Dark hover wash"
+      },
+      "error": {
+        "role": "semantic",
+        "displayName": "Error ink"
+      },
+      "dark-error": {
+        "role": "semantic",
+        "displayName": "Dark error ink"
+      },
+      "error-bg": {
+        "role": "semantic",
+        "displayName": "Error wash"
+      },
+      "dark-error-bg": {
+        "role": "semantic",
+        "displayName": "Dark error wash"
+      },
+      "warning": {
+        "role": "semantic",
+        "displayName": "Warning ink"
+      },
+      "dark-warning": {
+        "role": "semantic",
+        "displayName": "Dark warning ink"
+      },
+      "warning-bg": {
+        "role": "semantic",
+        "displayName": "Warning wash"
+      },
+      "dark-warning-bg": {
+        "role": "semantic",
+        "displayName": "Dark warning wash"
+      }
+    },
+    "typographyMeta": {
+      "interface": {
+        "displayName": "Interface",
+        "purpose": "Base application controls and settings titles."
+      },
+      "title": {
+        "displayName": "Manuscript title",
+        "purpose": "Document title; 26px at <=1150px and 25px at <=700px."
+      },
+      "headline": {
+        "displayName": "Section heading",
+        "purpose": "Document sections and dialog headings."
+      },
+      "body": {
+        "displayName": "Manuscript body",
+        "purpose": "Final cascade defaults to 16px; page-local settings allow 14–20px."
+      },
+      "navigation": {
+        "displayName": "Navigation",
+        "purpose": "File rows and document tabs."
+      },
+      "label": {
+        "displayName": "Supporting label",
+        "purpose": "Final 11px status, shortcuts, counts, and note metadata."
+      },
+      "source": {
+        "displayName": "Markdown source",
+        "purpose": "Separate monospace editable source view."
+      }
+    },
+    "shadows": [
+      {
+        "name": "overlay-light",
+        "value": "0 18px 65px #182e2629",
+        "purpose": "Dialogs and toast messages in light mode."
+      },
+      {
+        "name": "overlay-dark",
+        "value": "0 18px 65px #0007",
+        "purpose": "Dialogs and toast messages in dark mode."
+      }
+    ],
+    "motion": [
+      {
+        "name": "outline-navigation",
+        "value": "smooth",
+        "purpose": "JS scrollIntoView on outline selection; auto when prefers-reduced-motion is reduce."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "scroll-behavior:auto!important;transition:none!important",
+        "purpose": "Actual reduced-motion media-query declarations."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-desktop",
+        "value": "1150px"
+      },
+      {
+        "name": "inspector-collapse",
+        "value": "1050px"
+      },
+      {
+        "name": "small-workspace",
+        "value": "700px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary actions in welcome and recovery dialogs.",
+      "html": "<button class=\"ds-primary\">保留两个版本</button>",
+      "css": ".ds-primary{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;border:0;cursor:pointer;border-radius:var(--radius,6px);background:var(--accent,#356b59);color:var(--surface,#fcfaf6);padding:10px 18px;font-size:13px}.ds-primary:hover{filter:brightness(.94)}.ds-primary:focus-visible{outline:2px solid var(--accent,#356b59);outline-offset:3px}.ds-primary:disabled{opacity:.5;cursor:default}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Quiet companion action in a dialog.",
+      "html": "<button class=\"ds-secondary\">稍后处理</button>",
+      "css": ".ds-secondary{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;border:0;cursor:pointer;border-radius:var(--radius,6px);background:var(--sidebar,#f2efe9);color:var(--text,#2d3732);padding:10px 16px;font-size:12px}.ds-secondary:hover{background:var(--hover,#e9e8df)}.ds-secondary:focus-visible{outline:2px solid var(--accent,#356b59);outline-offset:3px}.ds-secondary:disabled{opacity:.5;cursor:default}"
+    },
+    {
+      "name": "Text button",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "Secondary welcome action in teal text.",
+      "html": "<button class=\"ds-text\">新建笔记库示例</button>",
+      "css": ".ds-text{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;border:0;cursor:pointer;border-radius:var(--radius,6px);background:none;color:var(--accent,#356b59);padding:10px 18px;font-size:12px;margin-top:6px}.ds-text:hover{background:var(--hover,#e9e8df)}.ds-text:focus-visible{outline:2px solid var(--accent,#356b59);outline-offset:3px}"
+    },
+    {
+      "name": "Icon button",
+      "kind": "button",
+      "refersTo": "button-icon",
+      "description": "Muted compact window and toolbar action.",
+      "html": "<button class=\"ds-icon\" aria-label=\"显示或隐藏目录\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 4h18v16H3z M8 4v16 M5 8h1 M5 12h1\"/></svg></button>",
+      "css": ".ds-icon{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;border:0;cursor:pointer;border-radius:var(--radius,6px);display:inline-flex;align-items:center;justify-content:center;width:29px;height:28px;background:none;color:var(--muted,#59655c)}.ds-icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.ds-icon:hover{background:var(--hover,#e9e8df)}.ds-icon:focus-visible{outline:2px solid var(--accent,#356b59);outline-offset:3px}"
+    },
+    {
+      "name": "Search field",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "Sidebar query field with container focus feedback.",
+      "html": "<label class=\"ds-search\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15 M16 16l5 5\"/></svg><input aria-label=\"搜索正文或标题\" placeholder=\"搜索正文或标题\"></label>",
+      "css": ".ds-search{display:flex;gap:8px;align-items:center;background:var(--surface,#fcfaf6);color:var(--text,#2d3732);border:1px solid var(--line,#e5e5dc);padding:8px;border-radius:var(--radius,6px)}.ds-search svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.ds-search input{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;font-size:12px;background:none;border:0;min-width:0;width:100%;color:var(--text,#2d3732);outline:none;border-radius:var(--radius,6px)}.ds-search input::placeholder{color:var(--muted,#59655c)}.ds-search:focus-within{border-color:var(--accent,#356b59)}"
+    },
+    {
+      "name": "File navigation",
+      "kind": "nav",
+      "refersTo": "file-row",
+      "description": "Compact file rows with selected wash and nested-content restraint.",
+      "html": "<nav class=\"ds-files\" aria-label=\"示例笔记\"><button class=\"ds-file\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 3h9l5 5v13H5z M14 3v5h5 M8 12h8 M8 16h6\"/></svg><span>项目概览</span></button><button class=\"ds-file ds-selected\" aria-current=\"page\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 3h9l5 5v13H5z M14 3v5h5 M8 12h8 M8 16h6\"/></svg><span>产品周会 · 10月12日</span></button></nav>",
+      "css": ".ds-files{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif}.ds-file{display:flex;align-items:center;gap:8px;padding:8px 9px;width:100%;text-align:left;font-family:inherit;font-size:12px;min-height:33px;border:0;border-radius:var(--radius,6px);background:none;color:var(--text,#2d3732);cursor:pointer}.ds-file svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;color:var(--muted,#59655c)}.ds-file:hover{background:var(--hover,#e9e8df)}.ds-file:focus-visible{outline:2px solid var(--accent,#356b59);outline-offset:3px}.ds-file.ds-selected{background:var(--accent-soft,#e3ece4);color:var(--accent,#356b59);font-weight:600}.ds-selected svg{color:var(--accent,#356b59)}"
+    },
+    {
+      "name": "Inline note link",
+      "kind": "chip",
+      "refersTo": "note-link",
+      "description": "Linked note rendered as a small inline wash.",
+      "html": "<a class=\"ds-note-link\" href=\"#meeting\">产品周会 · 10月12日</a>",
+      "css": ".ds-note-link{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;font-size:14px;background:var(--accent-soft,#e3ece4);color:var(--accent,#356b59);text-decoration:none;text-underline-offset:4px;padding:1px 4px;border-radius:3px}.ds-note-link:hover{text-decoration:underline}"
+    },
+    {
+      "name": "Manuscript summary",
+      "kind": "card",
+      "refersTo": "summary",
+      "description": "A quiet tonal callout within the document.",
+      "html": "<div class=\"ds-summary\">先验证即时预览和文件保存，再评审其他交互。</div>",
+      "css": ".ds-summary{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;font-size:14px;line-height:1.85;color:var(--text,#2d3732);margin:20px 0 8px;padding:14px 17px;background:var(--sidebar,#f2efe9);border-radius:4px}"
+    },
+    {
+      "name": "Dialog shell",
+      "kind": "custom",
+      "refersTo": "dialog",
+      "description": "Raised overlay shell shared by settings, templates, and recovery.",
+      "html": "<section class=\"ds-dialog\" aria-labelledby=\"ds-dialog-title\"><div class=\"ds-dialog-heading\"><h2 id=\"ds-dialog-title\">这篇笔记有两个版本</h2><button class=\"ds-close\" aria-label=\"关闭\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 6l12 12 M6 18L18 6\"/></svg></button></div><div class=\"ds-dialog-body\"><p>先查看差异，再选择保留方式。以下均为演示内容。</p></div></section>",
+      "css": ".ds-dialog{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;width:min(600px,calc(100vw - 40px));max-height:85vh;overflow:auto;background:var(--raised,#fffdf9);color:var(--text,#2d3732);border-radius:12px;box-shadow:var(--shadow,0 18px 65px #182e2629)}.ds-dialog-heading{display:flex;align-items:center;justify-content:space-between;padding:22px 25px 14px}.ds-dialog-heading h2{font-size:19px;font-weight:600;margin:0}.ds-dialog-body{padding:0 25px 25px}.ds-dialog-body p{font-size:12px;color:var(--muted,#59655c);line-height:1.8;margin:0 0 20px}.ds-close{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif;border:0;cursor:pointer;border-radius:var(--radius,6px);display:inline-flex;align-items:center;justify-content:center;width:29px;height:28px;background:none;color:var(--muted,#59655c)}.ds-close svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.ds-close:hover{background:var(--hover,#e9e8df)}.ds-close:focus-visible{outline:2px solid var(--accent,#356b59);outline-offset:3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "文稿居中",
+    "overview": "The confirmed identity is 温润素雅: warm white, ink-colored text, and a small amount of teal. A readable manuscript sits at the center of a compact desktop workspace. Navigation and auxiliary information support writing through quieter colors, smaller type, and thin dividers.\n\nSystem Chinese sans-serif typography and platform window conventions suit the macOS and Windows product context. The documented implementation is an interactive HTML prototype: notes, settings, saving, and recovery are examples held in page memory. The visual system does not establish real local-file functionality or a final application stack.",
+    "keyCharacteristics": [
+      "Warm paper surfaces and restrained teal interaction states.",
+      "Spacious manuscript, compact navigation, and collapsible auxiliary information.",
+      "Thin borders, low-radius controls, and elevation reserved for overlays.",
+      "Consistent inline SVG icons without shipping raster assets."
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Teal Rule",
+        "body": "Use the accent for interaction, selection, links, and focus, following the existing components.",
+        "section": "colors"
+      },
+      {
+        "name": "The Manuscript Hierarchy Rule",
+        "body": "Keep document headings and body larger than adjacent navigation and status information.",
+        "section": "typography"
+      },
+      {
+        "name": "The Overlay Elevation Rule",
+        "body": "Keep workspace panes flat; use the existing diffuse shadow for modal and transient overlays.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do preserve warm paper, ink, and restrained teal in both themes.",
+      "Do keep the manuscript centered and let supporting panes collapse at the implemented breakpoints.",
+      "Do distinguish selected, hovered, and keyboard-focused controls using their existing treatments.",
+      "Do use consistent inline SVG icons and retain explicit example-data labels in prototype surfaces."
+    ],
+    "donts": [
+      "Don't turn semantic error and warning colors into decorative accents.",
+      "Don't apply overlay shadows to ordinary workspace panes.",
+      "Don't present page-memory interactions as implemented local-file storage or persistent settings.",
+      "Don't inherit suppressed editor/input focus outlines as a general component rule."
+    ]
+  }
+}

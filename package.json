@@ -1,0 +1,67 @@
+{
+  "name": "plainote",
+  "version": "0.1.0",
+  "private": true,
+  "description": "素记 — 本地 Markdown 工作笔记",
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build:electron": "tsc -p tsconfig.electron.json && node scripts/copy-preload.mjs",
+    "build": "npm run typecheck && npm run build:electron && vite build",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "test:desktop": "node tests/electron-smoke.cjs",
+    "test:markdown": "node tests/markdown-desktop.cjs"
+  },
+  "build": {
+    "appId": "com.plainote.app",
+    "productName": "素记",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-renderer/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@lezer/highlight": "^1.2.5",
+    "codemirror": "^6.0.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "playwright-core": "^1.64.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}
