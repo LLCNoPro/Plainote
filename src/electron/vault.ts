@@ -175,6 +175,47 @@ export class VaultService {
       if (recovery?.content === snapshot.content) await rm(this.recoveryPath(relative), { force: true }).catch(() => {});
     });
   }
+  private async resolveEntry(relative: string, mustExist: boolean): Promise<string> {
+    const parts = this.validateRelative(relative, false);
+    let current = this.root;
+    for (let i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      let stat;
+      try { stat = await lstat(current); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          if (i < parts.length - 1) throw new VaultError('NOT_FOUND', '所在目录不存在。');
+          if (mustExist) throw new VaultError('NOT_FOUND', '要重命名的项目不存在。');
+          return current;
+        }
+        throw error;
+      }
+      if (stat.isSymbolicLink()) throw new VaultError('INVALID_PATH', '不能通过符号链接重命名。');
+      if (i < parts.length - 1 && !stat.isDirectory()) throw new VaultError('INVALID_PATH', '路径中间不是目录。');
+      if (i === parts.length - 1) {
+        if (mustExist) { if (!stat.isFile() && !stat.isDirectory()) throw new VaultError('INVALID_PATH', '该路径不是笔记或目录。'); }
+        else throw new VaultError('EXISTS', '同名项目已经存在，请换一个名称。');
+      }
+    }
+    return current;
+  }
+  private async remapRecoveries(relative: string, newRelative: string): Promise<void> {
+    const prefix = relative + '/';
+    for (const recovery of await this.listRecovery()) {
+      if (recovery.path !== relative && !recovery.path.startsWith(prefix)) continue;
+      const next = newRelative + recovery.path.slice(relative.length);
+      await this.writeRecovery(next, recovery.content, recovery.baseRevision);
+      await rm(this.recoveryPath(recovery.path), { force: true }).catch(() => {});
+    }
+  }
+  async rename(relative: string, newRelative: string): Promise<void> {
+    return this.queued('rename:' + relative, async () => {
+      const from = await this.resolveEntry(relative, true);
+      const to = await this.resolveEntry(newRelative, false);
+      await rename(from, to);
+      await this.remapRecoveries(relative, newRelative);
+    });
+  }
   async create(relative: string, content: string): Promise<NoteSnapshot> {
     const filename = await this.notePath(relative, true);
     return this.queued(relative, async () => {

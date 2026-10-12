@@ -52,6 +52,7 @@ register('choose-vault', chooseVault);
 register('current-vault', vaultInfo);
 register('directories', () => requireVault().directories());
 register('create-directory', (relative: string) => requireVault().createDirectory(relative));
+register('rename', (relative: string, newRelative: string) => { if (typeof relative !== 'string' || typeof newRelative !== 'string') throw new VaultError('INVALID_PATH', '重命名路径无效。'); return requireVault().rename(relative, newRelative); });
 register('trash', (relative: string, revision: string) => { contentArgs(relative, '', revision); return requireVault().trash(relative, revision, filename => shell.trashItem(filename)); });
 register('scan', () => requireVault().scan());
 register('read', (relative: string) => requireVault().read(relative));

@@ -14,9 +14,10 @@ async function eventually(fn){let error;for(let i=0;i<80;i++){try{return await f
  const env={...process.env,PLAINOTE_DATA_DIR:data};delete env.ELECTRON_RUN_AS_NODE;
  app=await electron.launch({executablePath:require('electron'),args:['.',`--vault=${vault}`],cwd,env});
  const page=await app.firstWindow();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const revealDirectory=title=>eventually(async()=>{await page.evaluate(()=>{for(const d of document.querySelectorAll('.files-pane details'))d.setAttribute('open','');});await page.locator(`summary[title="${title}"]`).waitFor({state:'visible',timeout:400});});
  await page.getByRole('button',{name:'新建目录',exact:true}).click();await page.getByLabel('目录名称',{exact:true}).fill('项目/会议');
  await page.getByRole('button',{name:'创建目录',exact:true}).click();
- await page.locator('summary[title="项目/会议"]').waitFor();
+ await revealDirectory('项目/会议');
  assert.deepEqual(await fs.readdir(path.join(vault,'项目/会议')),[]);
  await page.locator('.new-note').click();assert.equal(await page.getByLabel('笔记名称',{exact:true}).inputValue(),'项目/会议/未命名笔记.md');
  const name='Plainote-delete-'+path.basename(base)+'.md',relative='项目/会议/'+name;
@@ -48,7 +49,7 @@ async function eventually(fn){let error;for(let i=0;i<80;i++){try{return await f
  await eventually(async()=>assert.equal(await page.locator(`.file-row[title="${relative}"]`).count(),0));
  assert.equal(await app.evaluate(()=>globalThis.trashedPath),path.join(await fs.realpath(vault),relative));
  assert.equal(await page.getByRole('tab',{name:name.replace(/\.md$/,'')}).count(),0);
- await page.locator('summary[title="项目/会议"]').waitFor();
+ await revealDirectory('项目/会议');
  // Even the last file removed from a directory leaves that directory visible.
  await page.locator('.file-entry').filter({has:page.locator('.file-row[title="外部.md"]')}).hover();
  await page.getByRole('button',{name:'删除笔记 外部.md',exact:true}).click();

@@ -33,11 +33,13 @@
     ],
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png"
     },
     "win": {
       "target": "nsis",
-      "artifactName": "Plainote-${version}-Windows-${arch}.${ext}"
+      "artifactName": "Plainote-${version}-Windows-${arch}.${ext}",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

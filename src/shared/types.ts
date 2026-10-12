@@ -10,6 +10,7 @@ export interface PlainoteBridge {
   currentVault(): Promise<Result<VaultInfo | null>>;
   directories(): Promise<Result<string[]>>;
   createDirectory(path: string): Promise<Result<void>>;
+  rename(path: string, newPath: string): Promise<Result<void>>;
   trash(path: string, revision: string): Promise<Result<void>>;
   scan(): Promise<Result<NoteFile[]>>;
   read(path: string): Promise<Result<NoteSnapshot>>;

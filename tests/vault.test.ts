@@ -156,3 +156,38 @@ test('删除已经落盘的同内容恢复副本时清理记录', async t => {
   await vault.trash('笔记.md',note.revision,file=>rename(file,path.join(base,'trashed.md')));
   assert.equal(await vault.getRecovery('笔记.md'),null);
 });
+
+test('重命名笔记移动文件并保持内容', async t => {
+  const { vault, root } = await fixture(t);
+  await vault.create('旧名.md', '# 内容');
+  await vault.rename('旧名.md', '新名.md');
+  assert.equal(await readFile(path.join(root, '新名.md'), 'utf8'), '# 内容');
+  assert.deepEqual((await vault.scan()).map(f => f.path), ['新名.md']);
+  await assert.rejects(vault.read('旧名.md'), { code: 'NOT_FOUND' });
+});
+test('重命名到已存在目标或非法路径被拒绝', async t => {
+  const { vault, root } = await fixture(t);
+  await vault.create('a.md', 'a');
+  await vault.create('b.md', 'b');
+  await assert.rejects(vault.rename('a.md', 'b.md'), { code: 'EXISTS' });
+  for (const target of ['../out.md', '/abs.md', '.hidden.md']) await assert.rejects(vault.rename('a.md', target), { code: 'INVALID_PATH' });
+  assert.equal(await readFile(path.join(root, 'a.md'), 'utf8'), 'a');
+});
+test('重命名目录时子笔记跟随新路径', async t => {
+  const { vault, root } = await fixture(t);
+  await vault.createDirectory('旧目录');
+  await vault.create('旧目录/笔记.md', '# 笔记');
+  await vault.rename('旧目录', '新目录');
+  assert.deepEqual(await vault.directories(), ['新目录']);
+  assert.deepEqual((await vault.scan()).map(f => f.path), ['新目录/笔记.md']);
+  assert.equal(await readFile(path.join(root, '新目录', '笔记.md'), 'utf8'), '# 笔记');
+});
+test('重命名笔记后恢复内容跟随新路径', async t => {
+  const { vault, root } = await fixture(t);
+  await vault.create('旧.md', 'saved');
+  const note = await vault.read('旧.md');
+  await vault.stageRecovery('旧.md', 'unsaved', note.revision);
+  await vault.rename('旧.md', '新.md');
+  assert.equal((await vault.getRecovery('新.md'))?.content, 'unsaved');
+  assert.equal(await vault.getRecovery('旧.md'), null);
+});

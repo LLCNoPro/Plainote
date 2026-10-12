@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('plainote', {
   currentVault: () => invoke('current-vault'),
   directories: () => invoke('directories'),
   createDirectory: path => invoke('create-directory', path),
+  rename: (path, newPath) => invoke('rename', path, newPath),
   trash: (path, revision) => invoke('trash', path, revision),
   scan: () => invoke('scan'), read: path => invoke('read', path),
   save: (path, content, revision) => invoke('save', path, content, revision),
