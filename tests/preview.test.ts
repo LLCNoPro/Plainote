@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { syntaxTree } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { previewRanges, extractHeadings, tableCells, tableCellChange } from '../src/renderer/preview.ts';
+import { previewRanges, extractHeadings, tableCells, tableCellPosition } from '../src/renderer/preview.ts';
 const state = (doc: string) => EditorState.create({ doc, extensions: [markdown()] });
 test('非当前行呈现标题与强调，光标所在行保留源码标记', () => {
   const s = state('# 周会\n\n**重点**');
@@ -84,19 +84,21 @@ test('表格空单元格不移动后续列，转义的竖线不产生新列', ()
 });
 test('单元格修改只替换目标文字，保留其它列与 Markdown 强调', () => {
   const s = EditorState.create({doc:'| A | B |\n| --- | --- |\n| 素记 | **完成** |',extensions:[markdown({base:markdownLanguage})]});
-  const change = tableCellChange(s,0,1,0,'Plainote');
-  assert.ok(change);
-  assert.equal(s.update({changes:change!}).state.doc.toString(),'| A | B |\n| --- | --- |\n| Plainote | **完成** |');
+  const position = tableCellPosition(s,0,1,0);
+  assert.ok(position);
+  assert.equal(s.doc.sliceString(position.from, position.to),'素记');
 });
-test('空单元格可输入，竖线不会破坏表格结构', () => {
-  const s = EditorState.create({doc:'| A | B |\n| --- | --- |\n|  | keep |',extensions:[markdown({base:markdownLanguage})]});
-  const change = tableCellChange(s,0,1,0,'a|b');
-  assert.ok(change);
-  assert.equal(s.update({changes:change!}).state.doc.toString(),'| A | B |\n| --- | --- |\n| a\\|b | keep |');
+test('空单元格与转义竖线单元格返回正确的源码位置', () => {
+  const s = EditorState.create({doc:'| A | B | C |\n| --- | --- | --- |\n|  | x\\|y |  |',extensions:[markdown({base:markdownLanguage})]});
+  const row = syntaxTree(s).topNode.firstChild!.getChild('TableRow')!;
+  assert.deepEqual(tableCells(row,s).map(cell => cell ? s.doc.sliceString(cell.from,cell.to) : ''), ['', 'x\\|y', '']);
+  const empty = tableCellPosition(s,0,1,0), escaped = tableCellPosition(s,0,1,1);
+  assert.ok(empty && escaped);
+  assert.equal(s.doc.sliceString(empty.from,empty.to),'');
+  assert.equal(s.doc.sliceString(escaped.from,escaped.to),'x\\|y');
 });
-test('引用内的缺列单元格可输入，并保留引用前缀', () => {
-  const s = EditorState.create({doc:'> | A | B | C |\n> | --- | --- | --- |\n> | x |',extensions:[markdown({base:markdownLanguage})]});
-  const change = tableCellChange(s,2,1,2,'last');
-  assert.ok(change);
-  assert.equal(s.update({changes:change!}).state.doc.toString(),'> | A | B | C |\n> | --- | --- | --- |\n> | x |  | last |');
+test('越界行或列返回 null，不会破坏光标定位', () => {
+  const s = EditorState.create({doc:'| A | B |\n| --- | --- |\n| x | y |',extensions:[markdown({base:markdownLanguage})]});
+  assert.equal(tableCellPosition(s,0,5,0),null);
+  assert.equal(tableCellPosition(s,0,1,9),null);
 });

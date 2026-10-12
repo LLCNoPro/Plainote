@@ -1,6 +1,5 @@
 import type { EditorState } from '@codemirror/state';
-import { EditorState as State, StateEffect, StateField, Transaction } from '@codemirror/state';
-import { isolateHistory } from '@codemirror/commands';
+import { EditorState as State, StateEffect, StateField } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { normalizeDocument } from '../shared/raw-document.ts';
 import { syntaxTree } from '@codemirror/language';
@@ -155,25 +154,19 @@ function tableCellBounds(row: SyntaxNode, state: EditorState) {
 }
 export function tableCells(row: SyntaxNode, state: EditorState): (SyntaxNode | null)[] { return tableCellBounds(row, state).map(bound => bound.cell); }
 const tableRows = (root: SyntaxNode) => { const rows: SyntaxNode[] = []; for (let row = root.firstChild; row; row = row.nextSibling) if (row.name === 'TableHeader' || row.name === 'TableRow') rows.push(row); return rows; };
-function cellSource(root: SyntaxNode, state: EditorState, rowIndex: number, column: number) {
-  const row = tableRows(root)[rowIndex];
-  if (!row) return '';
+export function tableCellPosition(state: EditorState, tableFrom: number, rowIndex: number, column: number): { from: number; to: number } | null {
+  const root = findTable(state, tableFrom);
+  const row = root && tableRows(root)[rowIndex];
+  if (!row || column < 0) return null;
   const bound = tableCellBounds(row, state)[column];
-  return bound ? state.doc.sliceString(bound.from, bound.to) : '';
-}
-function paintCell(element: HTMLElement, root: SyntaxNode, state: EditorState, rowIndex: number, column: number) {
-  element.replaceChildren();
-  const row = tableRows(root)[rowIndex], cell = row && tableCells(row, state)[column];
-  element.dataset.row = String(rowIndex); element.dataset.column = String(index);
-        element.title = '点击编辑单元格';
-        if (cell) renderInline(element, cell, state);
+  return bound ? { from: bound.cell?.from ?? bound.from, to: bound.cell?.to ?? bound.to } : null;
 }
 class TableWidget extends WidgetType {
   constructor(readonly source: string, readonly from: number, readonly root: SyntaxNode, readonly state: EditorState) { super(); }
   eq(other: TableWidget) { return other.source === this.source && other.from === this.from; }
   toDOM(view: EditorView) {
     const wrap = document.createElement('div'); wrap.className = 'lp-table-preview';
-    const table = document.createElement('table'); table.setAttribute('aria-label', 'Markdown 表格，点击单元格编辑');
+    const table = document.createElement('table'); table.setAttribute('aria-label', 'Markdown 表格，点击进入编辑');
     wrap.dataset.tableFrom = String(this.from);
     const { state, root } = this;
     const divider = root.getChild('TableDelimiter')!;
@@ -190,7 +183,7 @@ class TableWidget extends WidgetType {
         const align = alignment[index] || '';
         element.style.textAlign = align.startsWith(':') && align.endsWith(':') ? 'center' : align.endsWith(':') ? 'right' : 'left';
         element.dataset.row = String(rowIndex); element.dataset.column = String(index);
-        element.title = '点击编辑单元格';
+        element.title = '点击进入编辑';
         if (cell) renderInline(element, cell, state);
         tr.append(element);
       }
@@ -198,68 +191,18 @@ class TableWidget extends WidgetType {
     }
     table.append(header, body); wrap.append(table);
     wrap.addEventListener('mousedown', event => {
-      if (event.button !== 0 || (event.target as HTMLElement).closest('.lp-cell-editor')) return;
+      if (event.button !== 0) return;
       const cell = (event.target as HTMLElement).closest<HTMLElement>('td,th');
       if (!cell || view.state.readOnly) return;
-      event.preventDefault(); openCellEditor(wrap, cell, view);
+      const position = tableCellPosition(view.state, this.from, Number(cell.dataset.row), Number(cell.dataset.column));
+      if (!position) return;
+      event.preventDefault();
+      view.focus();
+      view.dispatch({ effects: previewFocus.of(true), selection: { anchor: position.from }, scrollIntoView: true });
     });
     return wrap;
   }
-  updateDOM(dom: HTMLElement, view: EditorView) {
-    const input = dom.querySelector<HTMLInputElement>('.lp-cell-editor');
-    if (!input || input !== dom.ownerDocument.activeElement || dom.dataset.tableFrom !== String(this.from)) return false;
-    // Keep the native text field and its selection/IME session alive across document updates.
-    for (const cell of dom.querySelectorAll<HTMLElement>('td,th')) {
-      const row = Number(cell.dataset.row), column = Number(cell.dataset.column);
-      if (cell.contains(input)) {
-        const content = cellSource(this.root, view.state, row, column);
-        if (input.value !== content && !input.dataset.composing) {
-          const start = input.selectionStart ?? 0, end = input.selectionEnd ?? start;
-          input.value = content; input.setSelectionRange(Math.min(start, content.length), Math.min(end, content.length));
-        }
-      } else paintCell(cell, this.root, view.state, row, column);
-    }
-    return true;
-  }
   ignoreEvent() { return true; }
-}
-function openCellEditor(wrap: HTMLElement, cell: HTMLElement, view: EditorView) {
-  if (cell.querySelector('.lp-cell-editor') || view.state.readOnly) return;
-  const tableFrom = () => Number(wrap.dataset.tableFrom);
-  const rowIndex = Number(cell.dataset.row), column = Number(cell.dataset.column);
-  const root = findTable(view.state, tableFrom()); if (!root) return;
-  const input = document.createElement('input'); input.type = 'text'; input.className = 'lp-cell-editor';
-  input.setAttribute('aria-label', `编辑单元格：第${rowIndex + 1}行，第${column + 1}列`);
-  input.value = cellSource(root, view.state, rowIndex, column); input.spellcheck = false;
-  input.addEventListener('compositionstart', () => { input.dataset.composing = 'true'; });
-  input.addEventListener('compositionend', () => { delete input.dataset.composing; saveInput(); });
-  const saveInput = () => {
-    if (view.state.readOnly) return;
-    const change = tableCellChange(view.state, tableFrom(), rowIndex, column, input.value);
-    if (change && view.state.doc.sliceString(change.from, change.to) !== change.insert) view.dispatch({ changes: change, annotations: Transaction.userEvent.of('input.type') });
-  };
-  input.addEventListener('input', saveInput);
-  input.addEventListener('blur', () => {
-    const current = findTable(view.state, tableFrom());
-    if (current) paintCell(cell, current, view.state, rowIndex, column);
-    view.dispatch({ annotations: isolateHistory.of('after') });
-  });
-  input.addEventListener('keydown', event => {
-    if (event.isComposing || event.keyCode === 229) return;
-    if (event.key === 'Tab') {
-      event.preventDefault();
-      const cells = Array.from(wrap.querySelectorAll<HTMLElement>('td,th')), index = cells.indexOf(cell);
-      const next = cells[index + (event.shiftKey ? -1 : 1)];
-      if (next) { input.blur(); openCellEditor(wrap, next, view); return; }
-    } else if (event.key !== 'Enter' && event.key !== 'Escape') return;
-    event.preventDefault();
-    input.blur();
-    const current = findTable(view.state, tableFrom());
-    if (current) view.dispatch({ selection: { anchor: Math.min(current.to + 1, view.state.doc.length) }, annotations: isolateHistory.of('after') });
-    view.focus();
-  });
-  cell.replaceChildren(input); input.focus(); input.select();
-  view.dispatch({ effects: previewFocus.of(false), annotations: isolateHistory.of('before') });
 }
 const previewFocus = StateEffect.define<boolean>();
 const blockPreview = StateField.define<{ focused: boolean; decorations: DecorationSet }>({
@@ -290,14 +233,4 @@ export const livePreview = [blockPreview, inlinePreview, EditorView.domEventHand
   focus: (_event, view) => { view.dispatch({ effects: previewFocus.of(true) }); },
   blur: (_event, view) => { view.dispatch({ effects: previewFocus.of(false) }); },
 })];
-export function tableCellChange(state: EditorState, tableFrom: number, rowIndex: number, column: number, value: string): {from:number;to:number;insert:string} | null {
-  const root = findTable(state, tableFrom), row = root && tableRows(root)[rowIndex];
-  if (!row || column < 0) return null;
-  // A cell is one Markdown line; escape new pipes so typing cannot change the column structure.
-  const insert = value.replace(/[\r\n]+/g, ' ').replace(/(\\*)\|/g, (match, slashes: string) => slashes.length % 2 ? match : slashes + '\\|');
-  const bounds = tableCellBounds(row, state), bound = bounds[column];
-  if (bound) return { from: bound.from, to: bound.to, insert };
-  const leading = state.doc.sliceString(row.from, row.to).trim().endsWith('|') ? '' : ' |';
-  return { from: row.to, to: row.to, insert: leading + '  |'.repeat(column - bounds.length) + ' ' + insert + ' |' };
-}
 
