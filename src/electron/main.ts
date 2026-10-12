@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,7 @@ let quitRequested = false, closeAttempt = 0, closePromptOpen = false;
 app.on('before-quit', () => { quitRequested = true; });
 const userFile = () => path.join(app.getPath('userData'), 'preferences.json');
 const recoveryDir = () => path.join(app.getPath('userData'), 'recovery');
-async function vaultInfo(): Promise<VaultInfo | null> { return vault ? { root: vault.root, name: path.basename(vault.root), files: await vault.scan() } : null; }
+async function vaultInfo(): Promise<VaultInfo | null> { return vault ? { root: vault.root, name: path.basename(vault.root), files: await vault.scan(), directories: await vault.directories() } : null; }
 function requireVault(): VaultService { if (!vault) throw new VaultError('NO_VAULT', '请先打开一个笔记文件夹。'); return vault; }
 function validateSender(event: { sender: Electron.WebContents; senderFrame?: Electron.WebFrameMain | null }) {
   if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new VaultError('INVALID_PATH', '不允许从其他页面访问笔记库。');
@@ -42,14 +42,17 @@ async function chooseVault(): Promise<VaultInfo | null> {
   const selection = await dialog.showOpenDialog(window!, { title: '打开笔记库', buttonLabel: '打开笔记库', properties: ['openDirectory'] });
   if (selection.canceled || !selection.filePaths[0]) return null;
   const next = await VaultService.open(selection.filePaths[0], recoveryDir());
-  const files = await next.scan();
+  const files = await next.scan(), directories = await next.directories();
   vault = next;
   // A preference write must not make a successfully opened vault appear to fail.
   await rememberVault().catch(() => {});
-  return { root: next.root, name: path.basename(next.root), files };
+  return { root: next.root, name: path.basename(next.root), files, directories };
 }
 register('choose-vault', chooseVault);
 register('current-vault', vaultInfo);
+register('directories', () => requireVault().directories());
+register('create-directory', (relative: string) => requireVault().createDirectory(relative));
+register('trash', (relative: string, revision: string) => { contentArgs(relative, '', revision); return requireVault().trash(relative, revision, filename => shell.trashItem(filename)); });
 register('scan', () => requireVault().scan());
 register('read', (relative: string) => requireVault().read(relative));
 register('save', (relative: string, content: string, revision: string) => { contentArgs(relative, content, revision); return requireVault().save(relative, content, revision); });

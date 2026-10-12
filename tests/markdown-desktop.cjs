@@ -42,7 +42,7 @@ async function eventually(fn) { let last; for (let i=0;i<80;i++) { try { return 
  // 撤销后光标落在表格后的空行，重新点回顶层表格使其恢复源码，用于验证「聚焦表格保持源码」。
  await page.locator('.lp-table-preview').first().click();
  await page.waitForFunction(()=>!document.querySelector('.lp-table-preview th')?.textContent.includes('名称'));
- await page.locator('.mode-button').evaluate(button=>button.addEventListener('mousedown',event=>event.preventDefault()));
+ await page.locator('.mode-button').evaluateAll(buttons=>buttons.forEach(button=>button.addEventListener('mousedown',event=>event.preventDefault())));
  await page.getByRole('button',{name:'源码',exact:true}).click();
  assert.equal(await page.locator('.lp-code-label').count(),0);
  assert.equal(await page.locator('.lp-table-preview').count(),0);

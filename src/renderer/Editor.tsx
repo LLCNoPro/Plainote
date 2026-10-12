@@ -8,10 +8,16 @@ import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import { tags } from '@lezer/highlight';
 import { normalizeDocument, applyRawChanges } from '../shared/raw-document.ts';
-import { livePreview, syncPreviewFocus } from './preview.ts';
+import { livePreview, syncPreviewFocus, taskTogglePermission } from './preview.ts';
+import { editorPermissions } from '../shared/editor-mode.ts';
+import type { EditorMode } from '../shared/editor-mode.ts';
 import type { RawChange } from '../shared/raw-document.ts';
 
-interface Props { path: string; content: string; source: boolean; readOnly: boolean; onChange: (content: string) => void; onReady: (view: EditorView | null) => void }
+interface Props { path: string; content: string; mode: EditorMode; readOnly: boolean; onChange: (content: string) => void; onReady: (view: EditorView | null) => void }
+function permissionExtensions(props: Props) {
+  const permissions = editorPermissions(props.mode, props.readOnly);
+  return [EditorState.readOnly.of(permissions.readOnly), EditorView.editable.of(permissions.editable), taskTogglePermission.of(permissions.tasksEditable)];
+}
 const highlighting = HighlightStyle.define([
   { tag: tags.heading, fontWeight: '600' }, { tag: tags.strong, fontWeight: '650' },
   { tag: tags.emphasis, fontStyle: 'italic' }, { tag: tags.strikethrough, textDecoration: 'line-through' },
@@ -34,9 +40,9 @@ export function Editor(props: Props) {
     history(), drawSelection(), highlightActiveLine(), highlightSelectionMatches(),
     keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     markdown({ base: markdownLanguage, codeLanguages: languages }), syntaxHighlighting(highlighting), EditorView.lineWrapping,
-    EditorView.contentAttributes.of({ 'aria-label': 'Markdown 笔记正文', spellcheck: 'false' }),
-    placeholder('从这里开始记录…'), preview.current.of(callbacks.current.source ? [] : livePreview),
-    editable.current.of([EditorState.readOnly.of(callbacks.current.readOnly), EditorView.editable.of(!callbacks.current.readOnly)]),
+    EditorView.contentAttributes.of({ 'aria-label': 'Markdown 笔记正文', spellcheck: 'false', tabindex: '0' }),
+    placeholder('从这里开始记录…'), preview.current.of(callbacks.current.mode === 'source' ? [] : livePreview),
+    editable.current.of(permissionExtensions(callbacks.current)),
     EditorView.updateListener.of(update => {
       if (!update.docChanged) return;
       const changes: RawChange[] = [];
@@ -57,11 +63,11 @@ export function Editor(props: Props) {
     currentPath.current = props.path; raw.current = props.content;
     const cached = states.current.get(props.path);
     view.setState(cached && cached.raw === props.content ? cached.state : createState(props.content));
-    view.dispatch({ effects: preview.current.reconfigure(props.source ? [] : livePreview) });
+    view.dispatch({ effects: preview.current.reconfigure(props.mode === 'source' ? [] : livePreview) });
     syncPreviewFocus(view);
-    view.dispatch({ effects: editable.current.reconfigure([EditorState.readOnly.of(props.readOnly), EditorView.editable.of(!props.readOnly)]) });
+    view.dispatch({ effects: editable.current.reconfigure(permissionExtensions(props)) });
   }, [props.path, props.content]);
-  useEffect(() => { const view = viewRef.current; if (view) { view.dispatch({ effects: preview.current.reconfigure(props.source ? [] : livePreview) }); syncPreviewFocus(view); } }, [props.source]);
-  useEffect(() => { viewRef.current?.dispatch({ effects: editable.current.reconfigure([EditorState.readOnly.of(props.readOnly), EditorView.editable.of(!props.readOnly)]) }); }, [props.readOnly]);
-  return <div className={'markdown-editor' + (props.source ? ' source-mode' : '')} ref={host} />;
+  useEffect(() => { const view = viewRef.current; if (view) { view.dispatch({ effects: preview.current.reconfigure(props.mode === 'source' ? [] : livePreview) }); syncPreviewFocus(view); } }, [props.mode]);
+  useEffect(() => { viewRef.current?.dispatch({ effects: editable.current.reconfigure(permissionExtensions(props)) }); }, [props.readOnly, props.mode]);
+  return <div className={'markdown-editor' + (props.mode === 'source' ? ' source-mode' : props.mode === 'read' ? ' reading-mode' : '')} ref={host} />;
 }

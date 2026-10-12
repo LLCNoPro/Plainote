@@ -19,10 +19,10 @@ export class VaultService {
     if (!(await lstat(canonical)).isDirectory()) throw new VaultError('INVALID_PATH', '请选择一个笔记文件夹。');
     return new VaultService(canonical, recovery);
   }
-  private validateRelative(relative: string): string[] {
+  private validateRelative(relative: string, markdownOnly = true): string[] {
     if (typeof relative !== 'string' || !relative || relative.includes('\\') || relative.includes('\0') || path.isAbsolute(relative) || /^[a-z]:/i.test(relative)) throw new VaultError('INVALID_PATH', '笔记路径必须位于当前笔记库中。');
     const parts = relative.split('/');
-    if (parts.some(p => !p || p.startsWith('.')) || !/\.md$/i.test(parts.at(-1)!)) throw new VaultError('INVALID_PATH', '请选择笔记库中的 Markdown 文件。');
+    if (parts.some(p => !p || p.startsWith('.') || (!markdownOnly && (/[<>:"|?*]/.test(p) || /[. ]$/.test(p)))) || (markdownOnly && !/\.md$/i.test(parts.at(-1)!))) throw new VaultError('INVALID_PATH', '请选择笔记库中的 Markdown 文件。');
     return parts;
   }
   private async notePath(relative: string, allowMissing = false): Promise<string> {
@@ -135,6 +135,44 @@ export class VaultService {
         await rm(this.recoveryPath(relative), { force: true }).catch(() => {});
         return { path: relative, content, revision: hash(content), modified: Date.now() };
       } finally { await rm(temporary, { force: true }); }
+    });
+  }
+  async createDirectory(relative: string): Promise<void> {
+    const parts = this.validateRelative(relative, false);
+    return this.queued('directory:' + relative, async () => {
+      let current = this.root;
+      for (let index = 0; index < parts.length; index++) {
+        current = path.join(current, parts[index]);
+        let created = false;
+        try { await mkdir(current); created = true; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+        const stat = await lstat(current);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new VaultError('INVALID_PATH', '目录路径不能经过符号链接或文件。');
+        if (!created && index === parts.length - 1) throw new VaultError('EXISTS', '同名目录已经存在，请换一个名称。');
+      }
+    });
+  }
+  async directories(): Promise<string[]> {
+    const result: string[] = [];
+    const walk = async (directory: string, prefix: string) => {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || entry.isSymbolicLink() || !entry.isDirectory()) continue;
+        const relative = prefix + entry.name;
+        result.push(relative); await walk(path.join(directory, entry.name), relative + '/');
+      }
+    };
+    await walk(this.root, '');
+    return result.sort((a,b) => a.localeCompare(b, 'zh-CN'));
+  }
+  async trash(relative: string, revision: string, moveToTrash: (filename: string) => Promise<void>): Promise<void> {
+    this.validateRelative(relative);
+    return this.queued(relative, async () => {
+      const snapshot = await this.read(relative);
+      if (snapshot.revision !== revision) throw new VaultError('CONFLICT', '笔记已被其他应用修改，请重新查看内容后再删除。');
+      const filename = await this.notePath(relative);
+      const recovery = await this.getRecovery(relative);
+      await moveToTrash(filename);
+      if (recovery?.content === snapshot.content) await rm(this.recoveryPath(relative), { force: true }).catch(() => {});
     });
   }
   async create(relative: string, content: string): Promise<NoteSnapshot> {

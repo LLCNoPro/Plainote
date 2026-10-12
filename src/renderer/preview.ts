@@ -1,5 +1,5 @@
 import type { EditorState } from '@codemirror/state';
-import { EditorState as State, StateEffect, StateField } from '@codemirror/state';
+import { EditorState as State, StateEffect, StateField, Facet } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { normalizeDocument } from '../shared/raw-document.ts';
 import { syntaxTree } from '@codemirror/language';
@@ -7,6 +7,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import type { Range } from '@codemirror/state';
+export const taskTogglePermission = Facet.define<boolean, boolean>({ combine: values => values.length ? values.at(-1)! : false });
 export interface PreviewRange { kind: 'line' | 'hide' | 'mark' | 'task' | 'code-label' | 'rule' | 'bullet' | 'table'; from: number; to: number; className?: string; text?: string }
 export function extractHeadings(raw: string): { text: string; level: number; line: number }[] {
   const state = State.create({ doc: normalizeDocument(raw), extensions: [markdown({ base: markdownLanguage })] });
@@ -19,6 +20,7 @@ export function previewRanges(state: EditorState, activeLines: Set<number>): Pre
   const result: PreviewRange[] = [];
   const frontmatter = state.doc.sliceString(0, Math.min(state.doc.length, 100000)).match(/^---\n[\s\S]*?\n---(?:\n|$)/)?.[0].length ?? 0;
   const active = (from: number, to: number) => {
+    if (state.readOnly) return false;
     for (const line of activeLines) { const range = state.doc.line(line); if (range.from <= to && range.to >= from) return true; }
     return false;
   };
@@ -81,12 +83,13 @@ export function previewRanges(state: EditorState, activeLines: Set<number>): Pre
 }
 class TaskWidget extends WidgetType {
   checked: boolean; position: number;
-  constructor(checked: boolean, position: number) { super(); this.checked = checked; this.position = position; }
-  eq(other: TaskWidget) { return other.checked === this.checked && other.position === this.position; }
+  constructor(checked: boolean, position: number, readonly taskLocked: boolean) { super(); this.checked = checked; this.position = position; }
+  eq(other: TaskWidget) { return other.checked === this.checked && other.position === this.position && other.taskLocked === this.taskLocked; }
   toDOM(view: EditorView) {
     const input = document.createElement('input'); input.type = 'checkbox'; input.checked = this.checked;
+    input.disabled = this.taskLocked;
     input.className = 'cm-task-checkbox'; input.setAttribute('aria-label', '切换待办完成状态');
-    input.addEventListener('change', () => view.dispatch({ changes: { from: this.position + 1, to: this.position + 2, insert: input.checked ? 'x' : ' ' } }));
+    input.addEventListener('change', () => { if (!view.state.facet(taskTogglePermission)) { input.checked = this.checked; return; } view.dispatch({ changes: { from: this.position + 1, to: this.position + 2, insert: input.checked ? 'x' : ' ' } }); });
     return input;
   }
   ignoreEvent() { return true; }
@@ -106,7 +109,7 @@ const inlinePreview = ViewPlugin.fromClass(class {
       if (range.kind === 'line') decorations.push(Decoration.line({ class: range.className }).range(range.from));
       else if (range.kind === 'hide') decorations.push(Decoration.replace({}).range(range.from, range.to));
       else if (range.kind === 'mark') decorations.push(Decoration.mark({ class: range.className }).range(range.from, range.to));
-      else if (range.kind === 'task') decorations.push(Decoration.replace({ widget: new TaskWidget(/x/i.test(view.state.doc.sliceString(range.from, range.to)), range.from) }).range(range.from, range.to));
+      else if (range.kind === 'task') decorations.push(Decoration.replace({ widget: new TaskWidget(/x/i.test(view.state.doc.sliceString(range.from, range.to)), range.from, !view.state.facet(taskTogglePermission)) }).range(range.from, range.to));
       else if (range.kind !== 'table') decorations.push(Decoration.replace({ widget: new LabelWidget(range.kind, range.text || '') }).range(range.from, range.to));
     }
     return Decoration.set(decorations, true);
@@ -210,7 +213,7 @@ const blockPreview = StateField.define<{ focused: boolean; decorations: Decorati
   update(value, transaction) {
     let focused = value.focused;
     for (const effect of transaction.effects) if (effect.is(previewFocus)) focused = effect.value;
-    if (transaction.docChanged || transaction.selection || focused !== value.focused) return { focused, decorations: tableDecorations(transaction.state, focused) };
+    if (transaction.docChanged || transaction.selection || focused !== value.focused || transaction.startState.readOnly !== transaction.state.readOnly) return { focused, decorations: tableDecorations(transaction.state, focused) };
     return value;
   },
   provide: field => EditorView.decorations.from(field, value => value.decorations),

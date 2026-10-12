@@ -1,0 +1,35 @@
+const {_electron:electron}=require('playwright-core');
+const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
+let app;const cwd=path.resolve('.'),out=path.join(cwd,'.impeccable/review/reading');
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function eventually(fn){let last;for(let i=0;i<80;i++){try{return await fn();}catch(error){last=error;}await pause(75);}throw last;}
+(async()=>{
+ const base=await fs.mkdtemp(path.join(os.tmpdir(),'plainote-read-')),root=path.join(base,'阅读验证'),data=path.join(base,'profile');await fs.mkdir(root);await fs.mkdir(data);await fs.mkdir(out,{recursive:true});
+ const source='# 阅读模式\n\n正文可以选择，但不能修改。\n\n- [ ] 完成验证\n\n## 表格\n\n| 名称 | 状态 |\n| --- | --- |\n| 素记 | 完成 |\n\n## 代码\n\n```js\nconst answer = 42;\n```\n';
+ const file=path.join(root,'A.md');await fs.writeFile(file,source);await fs.writeFile(path.join(root,'B.md'),'# 第二篇\n\n继续阅读。\n');
+ const env={...process.env,PLAINOTE_DATA_DIR:data};delete env.ELECTRON_RUN_AS_NODE;
+ app=await electron.launch({executablePath:require('electron'),args:['.',`--vault=${root}`],cwd,env});const page=await app.firstWindow();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.getByRole('group',{name:'正文显示模式'}).getByRole('button',{name:'阅读模式',exact:true}).click();
+ assert.equal(await page.locator('.cm-content').getAttribute('contenteditable'),'false');
+ assert.equal(await page.locator('.note-meta').count(),0);
+ const mode=await page.locator('.editor-modes').boundingBox(),trash=await page.getByRole('button',{name:'删除当前笔记'}).boundingBox();assert.ok(trash.x-(mode.x+mode.width)<20);
+ await page.locator('.cm-content').click();await page.keyboard.insertText('不应该写入');await page.keyboard.press('Backspace');await page.keyboard.press(process.platform==='darwin'?'Meta+z':'Control+z');await pause(750);
+ assert.equal(await fs.readFile(file,'utf8'),source);
+ await page.locator('.cm-task-checkbox').check();
+ await eventually(async()=>assert.equal(await fs.readFile(file,'utf8'),source.replace('- [ ]','- [x]')));
+ await page.locator('.cm-task-checkbox').uncheck();await eventually(async()=>assert.equal(await fs.readFile(file,'utf8'),source));
+ await page.locator('.cm-content').click();await page.keyboard.press(process.platform==='darwin'?'Meta+a':'Control+a');
+ await eventually(async()=>assert.ok(await page.locator('.cm-selectionBackground').count()>0));
+ await page.locator('.lp-table-preview').click();assert.equal(await page.locator('.lp-table-preview').count(),1);
+ assert.equal(await fs.readFile(file,'utf8'),source);
+ await page.locator('.outline').getByRole('button',{name:'表格',exact:true}).click();assert.equal(await page.locator('.lp-table-preview').count(),1);
+ assert.equal(await page.locator('.cm-cursor').evaluateAll(nodes=>nodes.some(node=>getComputedStyle(node).display!=='none' && getComputedStyle(node.parentElement).display!=='none')),false);
+ await page.screenshot({path:path.join(out,'light.png')});
+ await page.locator('.theme-button').click();await page.screenshot({path:path.join(out,'dark.png')});
+ await page.locator('.file-row[title="B.md"]').click();assert.equal(await page.locator('.cm-content').getAttribute('contenteditable'),'false');
+ await page.locator('.file-row[title="A.md"]').click();assert.equal(await page.locator('.cm-content').getAttribute('contenteditable'),'false');
+ await page.getByRole('button',{name:'源码',exact:true}).click();assert.equal(await page.locator('.cm-content').getAttribute('contenteditable'),'true');
+ await page.locator('.cm-content').click();await page.keyboard.press(process.platform==='darwin'?'Meta+ArrowDown':'Control+End');await page.keyboard.insertText('源码仍可编辑');await eventually(async()=>assert.ok((await fs.readFile(file,'utf8')).includes('源码仍可编辑')));
+ await page.getByRole('button',{name:'即时预览',exact:true}).click();assert.equal(await page.locator('.cm-content').getAttribute('contenteditable'),'true');
+ assert.deepEqual(errors,[]);const report={status:'passed',checks:['顶部操作紧邻','删除无用元信息','阅读正文禁止输入删除和撤销','阅读允许选择文本','阅读允许勾选取消待办并落盘','阅读表格与大纲保持预览','切换笔记保持只读','源码与即时预览可编辑'],pageErrors:errors};await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));await app.close();app=null;
+})().catch(async error=>{console.error(error);if(app){try{await(await app.firstWindow()).screenshot({path:path.join(out,'failure.png')});}catch{}app.process().kill('SIGKILL');}process.exit(1);});

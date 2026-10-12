@@ -15,7 +15,10 @@
     "package": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "test:desktop": "node tests/electron-smoke.cjs",
-    "test:markdown": "node tests/markdown-desktop.cjs"
+    "test:markdown": "node tests/markdown-desktop.cjs",
+    "test:files": "node tests/file-management-desktop.cjs",
+    "test:reading": "node tests/reading-desktop.cjs",
+    "dist:win": "npm run build && electron-builder --win nsis zip --x64 --publish never"
   },
   "build": {
     "appId": "com.plainote.app",
@@ -33,11 +36,13 @@
       "category": "public.app-category.productivity"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "artifactName": "Plainote-${version}-Windows-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Plainote-${version}-Setup-${arch}.${ext}"
     }
   },
   "dependencies": {

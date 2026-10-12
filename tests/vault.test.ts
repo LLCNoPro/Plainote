@@ -103,3 +103,56 @@ test('原笔记被删除后仍能列出恢复内容，不依赖原路径存在',
   assert.equal(recovered[0].content, 'unsaved work');
   assert.equal(recovered[0].path, 'deleted.md');
 });
+
+test('创建中文嵌套目录，空目录可扫描，重名不覆盖', async t => {
+  const {vault,root} = await fixture(t);
+  await vault.createDirectory('项目/会议');
+  assert.deepEqual(await vault.directories(), ['项目','项目/会议']);
+  assert.deepEqual(await readdir(path.join(root,'项目','会议')), []);
+  await assert.rejects(vault.createDirectory('项目/会议'), {code:'EXISTS'});
+  await vault.create('项目/会议/周会.md','# 周会');
+  assert.equal((await vault.scan())[0].path,'项目/会议/周会.md');
+});
+test('创建目录拒绝越界和符号链接，不扫描隐藏目录', async t => {
+  const {vault,root,base} = await fixture(t);
+  await mkdir(path.join(root,'.hidden'));
+  await mkdir(path.join(base,'outside'));
+  await symlink(path.join(base,'outside'),path.join(root,'linked'));
+  for (const name of ['../escape','/absolute','.hidden/new','linked/new']) await assert.rejects(vault.createDirectory(name),{code:'INVALID_PATH'});
+  assert.deepEqual(await vault.directories(),[]);
+  assert.deepEqual(await readdir(path.join(base,'outside')),[]);
+});
+test('删除笔记按版本检查并通过可恢复的移动操作完成', async t => {
+  const {vault,root,base} = await fixture(t);
+  await writeFile(path.join(root,'笔记.md'),'original');
+  const snapshot = await vault.read('笔记.md');
+  await vault.stageRecovery('笔记.md','backup',snapshot.revision);
+  const {rename} = await import('node:fs/promises');
+  const target = path.join(base,'trashed.md');
+  await vault.trash('笔记.md',snapshot.revision,file=>rename(file,target));
+  assert.equal(await readFile(target,'utf8'),'original');
+  assert.deepEqual(await vault.scan(),[]);
+  assert.equal((await vault.getRecovery('笔记.md'))?.content,'backup');
+});
+test('外部修改和回收站错误不会丢掉原笔记', async t => {
+  const {vault,root} = await fixture(t);
+  await writeFile(path.join(root,'笔记.md'),'original');
+  const snapshot = await vault.read('笔记.md');
+  await writeFile(path.join(root,'笔记.md'),'external');
+  let moved = false;
+  await assert.rejects(vault.trash('笔记.md',snapshot.revision,async()=>{moved=true;}),{code:'CONFLICT'});
+  assert.equal(moved,false);
+  const latest = await vault.read('笔记.md');
+  await assert.rejects(vault.trash('笔记.md',latest.revision,async()=>{throw new Error('trash failed');}),/trash failed/);
+  assert.equal(await readFile(path.join(root,'笔记.md'),'utf8'),'external');
+});
+
+test('删除已经落盘的同内容恢复副本时清理记录', async t => {
+  const {vault,root,base} = await fixture(t);
+  await writeFile(path.join(root,'笔记.md'),'same');
+  const note = await vault.read('笔记.md');
+  await vault.stageRecovery('笔记.md','same',note.revision);
+  const {rename} = await import('node:fs/promises');
+  await vault.trash('笔记.md',note.revision,file=>rename(file,path.join(base,'trashed.md')));
+  assert.equal(await vault.getRecovery('笔记.md'),null);
+});

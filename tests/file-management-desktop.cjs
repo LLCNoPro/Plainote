@@ -1,0 +1,64 @@
+const { _electron: electron } = require('playwright-core');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const assert = require('node:assert/strict');
+let app;
+const cwd = path.resolve('.'), output=path.join(cwd,'.impeccable/review/file-management');
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function eventually(fn){let error;for(let i=0;i<80;i++){try{return await fn();}catch(e){error=e;}await pause(75);}throw error;}
+(async()=>{
+ const base=await fs.mkdtemp(path.join(os.tmpdir(),'plainote-files-'));
+ const vault=path.join(base,'文件管理验证'),data=path.join(base,'profile');await fs.mkdir(vault);await fs.mkdir(data);await fs.mkdir(output,{recursive:true});
+ await fs.writeFile(path.join(vault,'保留.md'),'# 保留\n');await fs.writeFile(path.join(vault,'外部.md'),'# Original');
+ const env={...process.env,PLAINOTE_DATA_DIR:data};delete env.ELECTRON_RUN_AS_NODE;
+ app=await electron.launch({executablePath:require('electron'),args:['.',`--vault=${vault}`],cwd,env});
+ const page=await app.firstWindow();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.getByRole('button',{name:'新建目录',exact:true}).click();await page.getByLabel('目录名称',{exact:true}).fill('项目/会议');
+ await page.getByRole('button',{name:'创建目录',exact:true}).click();
+ await page.locator('summary[title="项目/会议"]').waitFor();
+ assert.deepEqual(await fs.readdir(path.join(vault,'项目/会议')),[]);
+ await page.locator('.new-note').click();assert.equal(await page.getByLabel('笔记名称',{exact:true}).inputValue(),'项目/会议/未命名笔记.md');
+ const name='Plainote-delete-'+path.basename(base)+'.md',relative='项目/会议/'+name;
+ await page.getByLabel('笔记名称',{exact:true}).fill(relative);await page.getByRole('button',{name:'创建笔记',exact:true}).click();
+ await page.waitForFunction(name=>document.querySelector('.breadcrumb')?.textContent.includes(name.replace(/\.md$/,'')),name);
+ await page.locator('.cm-content').click();await page.keyboard.insertText('# 删除验证\n中文未保存内容');
+ await page.getByRole('button',{name:'删除当前笔记',exact:true}).click();await page.getByRole('button',{name:'取消',exact:true}).click();
+ assert.ok((await fs.stat(path.join(vault,relative))).isFile());
+ await app.evaluate(({shell})=>{globalThis.originalTrash=shell.trashItem;shell.trashItem=async()=>{throw new Error('模拟回收站失败');};});
+ await page.getByRole('button',{name:'删除当前笔记',exact:true}).click();await page.getByRole('button',{name:'移到回收站',exact:true}).click();
+ await page.getByRole('alert').filter({hasText:'模拟回收站失败'}).waitFor();
+ assert.ok((await fs.readFile(path.join(vault,relative),'utf8')).includes('中文未保存内容'));
+ await page.getByRole('button',{name:'取消',exact:true}).click();
+ await app.evaluate(({shell})=>{shell.trashItem=async filename=>{globalThis.trashedPath=filename;globalThis.trashStarted=true;await new Promise(resolve=>{globalThis.releaseTrash=resolve;});await globalThis.originalTrash(filename);};});
+ await page.getByRole('button',{name:'删除当前笔记',exact:true}).click();
+ await page.screenshot({path:path.join(output,'delete-confirm.png')});
+ await page.getByRole('button',{name:'移到回收站',exact:true}).click();
+ await eventually(async()=>assert.equal(await app.evaluate(()=>globalThis.trashStarted),true));
+ await app.evaluate(({BrowserWindow,dialog})=>{dialog.showMessageBox=async()=>{globalThis.closeCanceled=true;return {response:0,checkboxChecked:false};};BrowserWindow.getAllWindows()[0].close();});
+ await eventually(async()=>assert.equal(await app.evaluate(()=>globalThis.closeCanceled),true)).catch(async()=>{
+   // The native timeout is ten seconds; wait for that explicit cancellation acknowledgement.
+   for(let i=0;i<80;i++){if(await app.evaluate(()=>globalThis.closeCanceled)) return;await pause(100);}throw new Error('close cancellation did not arrive');
+ });
+ await pause(100);
+ assert.equal(await page.locator('.workspace').getAttribute('inert'),'');
+ assert.equal(await page.locator('.cm-content').getAttribute('contenteditable'),'false');
+ await app.evaluate(()=>globalThis.releaseTrash());
+ await eventually(async()=>assert.equal(await fs.access(path.join(vault,relative)).then(()=>true,()=>false),false));
+ await eventually(async()=>assert.equal(await page.locator(`.file-row[title="${relative}"]`).count(),0));
+ assert.equal(await app.evaluate(()=>globalThis.trashedPath),path.join(await fs.realpath(vault),relative));
+ assert.equal(await page.getByRole('tab',{name:name.replace(/\.md$/,'')}).count(),0);
+ await page.locator('summary[title="项目/会议"]').waitFor();
+ // Even the last file removed from a directory leaves that directory visible.
+ await page.locator('.file-entry').filter({has:page.locator('.file-row[title="外部.md"]')}).hover();
+ await page.getByRole('button',{name:'删除笔记 外部.md',exact:true}).click();
+ await fs.writeFile(path.join(vault,'外部.md'),'# 外部修改');
+ await page.getByRole('button',{name:'移到回收站',exact:true}).click();
+ await page.getByRole('alert').filter({hasText:'修改'}).waitFor();
+ assert.equal(await fs.readFile(path.join(vault,'外部.md'),'utf8'),'# 外部修改');
+ await page.getByRole('button',{name:'取消',exact:true}).click();
+ await page.screenshot({path:path.join(output,'directories.png')});
+ assert.deepEqual(errors,[]);
+ const report={status:'passed',checks:['中文嵌套目录','空目录显示','目录内创建笔记','取消删除','回收站失败保留原文','删除期间取消退出保持编辑锁','保存最新编辑后移入系统回收站','移除标签和文件行','删除后空目录保留','外部修改阻止删除'],pageErrors:errors};
+ await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));await app.close();app=null;
+})().catch(async e=>{console.error(e);if(app){try{await (await app.firstWindow()).screenshot({path:path.join(output,'failure.png')});}catch{}app.process().kill('SIGKILL');}process.exit(1);});

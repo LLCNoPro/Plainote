@@ -102,3 +102,9 @@ test('越界行或列返回 null，不会破坏光标定位', () => {
   assert.equal(tableCellPosition(s,0,5,0),null);
   assert.equal(tableCellPosition(s,0,1,9),null);
 });
+test('只读阅读时，光标所在的标题和表格仍保持预览', () => {
+  const s = EditorState.create({doc:'# 标题\n\n| A | B |\n| --- | --- |\n| x | y |', extensions:[markdown({base:markdownLanguage}),EditorState.readOnly.of(true)]});
+  const ranges = previewRanges(s,new Set([1,3,5]));
+  assert.ok(ranges.some(range=>range.kind==='hide' && range.from===0));
+  assert.ok(ranges.some(range=>range.kind==='table'));
+});
