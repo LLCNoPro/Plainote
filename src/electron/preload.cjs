@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('plainote', {
   aiSetConfig: config => invoke('ai-set-config', config),
   aiSearch: query => invoke('ai-search', query),
   aiChat: (messages, context) => invoke('ai-chat', messages, context),
+  aiIndex: () => invoke('ai-index'),
   aiCancel: sessionId => invoke('ai-cancel', sessionId),
   onAiToken: callback => subscribe('ai-token', callback),
   onAiDone: callback => subscribe('ai-done', callback),

@@ -26,9 +26,22 @@ export async function saveAiConfig(preferencesPath: string, config: AiConfig): P
   await writeFile(preferencesPath, JSON.stringify({ ...existing, ai }), 'utf8');
 }
 
+// 对查询分词：中文按二元组分词以提升召回，英文按空格/标点切分。
+function tokenize(query: string): string[] {
+  const phrases = query.toLowerCase().split(/[\s,，。;；、/\\:：!！?？()（）\[\]'"“”]+/).filter(Boolean);
+  const terms: string[] = [];
+  for (const phrase of phrases) {
+    if (/[一-鿿]/.test(phrase)) {
+      if (phrase.length <= 2) terms.push(phrase);
+      else for (let i = 0; i < phrase.length - 1; i++) terms.push(phrase.slice(i, i + 2));
+    } else terms.push(phrase);
+  }
+  return [...new Set(terms)];
+}
+
 // 关键词全文打分：query 与每篇笔记做重叠匹配，返回 Top-N 命中。
 export function searchNotes(query: string, notes: AiNoteContext[], limit = 5): AiSearchHit[] {
-  const terms = query.toLowerCase().split(/[\s,，。;；、/\\]+/).filter(t => t.length > 0);
+  const terms = tokenize(query);
   if (!terms.length) return [];
   const hits: AiSearchHit[] = [];
   for (const note of notes) {
@@ -48,10 +61,11 @@ export function searchNotes(query: string, notes: AiNoteContext[], limit = 5): A
 }
 
 function buildSystem(context: AiContext): string {
-  const parts = ['你是「素记」本地 Markdown 笔记的 AI 助手，帮助用户查询、总结笔记内容并提供写作辅助。回答使用中文，涉及笔记内容时使用 Markdown 格式。'];
+  const parts = ['你是「素记」本地 Markdown 笔记库的 AI 助手。把整个笔记库当作一个项目看待，综合检索到的相关笔记回答。回答使用中文，内容使用 Markdown 格式。'];
   if (context.currentNote) parts.push(`【当前笔记：${context.currentNote.name}】\n${context.currentNote.content}`);
   if (context.selection) parts.push(`【用户选中的文本】\n${context.selection}`);
-  if (context.retrieved?.length) parts.push('【相关笔记】\n' + context.retrieved.map(n => `### ${n.name}\n${n.content}`).join('\n\n'));
+  if (context.retrieved?.length) parts.push('【从笔记库检索到的相关笔记】\n' + context.retrieved.map(n => `### ${n.name}\n${n.content}`).join('\n\n'));
+  parts.push('回答指引：默认综合【相关笔记】与【当前笔记】回答；仅当用户明确要求「基于当前笔记」时，才只参考【当前笔记】。');
   return parts.join('\n\n');
 }
 

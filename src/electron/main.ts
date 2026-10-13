@@ -119,11 +119,39 @@ register('ai-chat', async (messages: AiChatMessage[], context: AiContext) => {
   if (!Array.isArray(messages) || typeof context !== 'object' || context === null) throw new VaultError('INVALID_PATH', '聊天参数无效。');
   const config = await readAiConfig(userFile());
   if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
+  const query = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
+  const vault = requireVault();
+  const files = (await vault.scan()).slice(0, 200);
+  const notes = await Promise.all(files.map(async f => { const n = await vault.read(f.path); return { path: f.path, name: f.name, content: n.content }; }));
+  const retrieved = searchNotes(query, notes, 6).map(h => ({ path: h.path, name: h.name, content: h.content }));
+  const fullContext: AiContext = { ...context, retrieved: retrieved.length ? retrieved : undefined };
   const sessionId = randomUUID();
   const controller = new AbortController();
   aiSessions.set(sessionId, controller);
-  void streamChat(config, messages, context, text => window?.webContents.send('plainote:ai-token', sessionId, text), controller.signal)
+  void streamChat(config, messages, fullContext, text => window?.webContents.send('plainote:ai-token', sessionId, text), controller.signal)
     .then(() => { aiSessions.delete(sessionId); window?.webContents.send('plainote:ai-done', sessionId); })
+    .catch(error => { aiSessions.delete(sessionId); window?.webContents.send('plainote:ai-error', sessionId, error instanceof VaultError ? error.message : 'AI 请求失败。'); });
+  return sessionId;
+});
+register('ai-index', async () => {
+  const config = await readAiConfig(userFile());
+  if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
+  const vault = requireVault();
+  const files = (await vault.scan()).filter(f => f.path !== 'AGENT.md').slice(0, 200);
+  const notes = await Promise.all(files.map(async f => { const n = await vault.read(f.path); return { path: f.path, name: f.name, content: n.content }; }));
+  const sessionId = randomUUID();
+  const controller = new AbortController();
+  let full = '';
+  void streamChat(config, [{ role: 'user', content: '请整理这个笔记库，生成一份项目概览（AGENT.md）：按主题归纳各笔记，说明每篇的内容摘要与相互关联。' }], { retrieved: notes }, text => { full += text; window?.webContents.send('plainote:ai-token', sessionId, text); }, controller.signal)
+    .then(async () => {
+      try {
+        const exists = (await vault.scan()).some(f => f.path === 'AGENT.md');
+        if (exists) { const cur = await vault.read('AGENT.md'); await vault.save('AGENT.md', full, cur.revision); }
+        else await vault.create('AGENT.md', full);
+      } catch { /* 索引写入失败不阻断流式结果 */ }
+      aiSessions.delete(sessionId);
+      window?.webContents.send('plainote:ai-done', sessionId);
+    })
     .catch(error => { aiSessions.delete(sessionId); window?.webContents.send('plainote:ai-error', sessionId, error instanceof VaultError ? error.message : 'AI 请求失败。'); });
   return sessionId;
 });

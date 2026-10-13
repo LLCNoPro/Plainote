@@ -17,6 +17,7 @@ export interface PlainoteBridge {
   aiSetConfig(config: AiConfig): Promise<Result<void>>;
   aiSearch(query: string): Promise<Result<AiSearchHit[]>>;
   aiChat(messages: AiChatMessage[], context: AiContext): Promise<Result<string>>;
+  aiIndex(): Promise<Result<string>>;
   aiCancel(sessionId: string): Promise<Result<void>>;
   onAiToken(callback: (sessionId: string, text: string) => void): () => void;
   onAiDone(callback: (sessionId: string) => void): () => void;
