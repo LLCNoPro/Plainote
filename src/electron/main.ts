@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { VaultService, VaultError } from './vault.ts';
+import { readAiConfig, saveAiConfig, searchNotes, streamChat } from './ai.ts';
+import type { AiChatMessage, AiConfig, AiContext } from '../shared/ai.ts';
 import type { Result, VaultInfo } from '../shared/types.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -104,6 +106,28 @@ register('export-docx', (content: string, sourcePath: string, pandocPath: string
   if (typeof content !== 'string' || typeof sourcePath !== 'string' || typeof pandocPath !== 'string') throw new VaultError('INVALID_PATH', '导出参数无效。');
   return exportDocx(content, sourcePath, pandocPath);
 });
+register('ai-get-config', () => readAiConfig(userFile()));
+register('ai-set-config', (config: AiConfig) => saveAiConfig(userFile(), config));
+register('ai-search', async (query: string) => {
+  if (typeof query !== 'string') throw new VaultError('INVALID_PATH', '检索参数无效。');
+  const files = (await requireVault().scan()).slice(0, 200);
+  const notes = await Promise.all(files.map(async file => { const note = await requireVault().read(file.path); return { path: file.path, name: file.name, content: note.content }; }));
+  return searchNotes(query, notes);
+});
+const aiSessions = new Map<string, AbortController>();
+register('ai-chat', async (messages: AiChatMessage[], context: AiContext) => {
+  if (!Array.isArray(messages) || typeof context !== 'object' || context === null) throw new VaultError('INVALID_PATH', '聊天参数无效。');
+  const config = await readAiConfig(userFile());
+  if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
+  const sessionId = randomUUID();
+  const controller = new AbortController();
+  aiSessions.set(sessionId, controller);
+  void streamChat(config, messages, context, text => window?.webContents.send('plainote:ai-token', sessionId, text), controller.signal)
+    .then(() => { aiSessions.delete(sessionId); window?.webContents.send('plainote:ai-done', sessionId); })
+    .catch(error => { aiSessions.delete(sessionId); window?.webContents.send('plainote:ai-error', sessionId, error instanceof VaultError ? error.message : 'AI 请求失败。'); });
+  return sessionId;
+});
+register('ai-cancel', async (sessionId: string) => { aiSessions.get(sessionId)?.abort(); aiSessions.delete(sessionId); });
 
 async function closeDecision(message: string, requestId: number) {
   if (!window || window.isDestroyed() || !closePending || requestId !== closeAttempt || closePromptOpen) return;
