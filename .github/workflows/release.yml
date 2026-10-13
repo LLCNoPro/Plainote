@@ -15,11 +15,8 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            name: macos-arm64
-            args: --mac dmg --arm64
-          - os: macos-13
-            name: macos-x64
-            args: --mac dmg --x64
+            name: macos
+            args: --mac dmg --arm64 --x64
           - os: windows-latest
             name: windows-x64
             args: --win nsis zip --x64
