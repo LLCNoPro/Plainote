@@ -14,8 +14,16 @@ import type { AiChatMessage, AiConfig, AiContext, AiNoteContext } from '../share
 import type { Result, VaultInfo } from '../shared/types.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
-const iconPath = path.join(directory, '..', '..', 'build', 'icon.png');
-const windowIcon = existsSync(iconPath) ? { icon: iconPath } : {};
+// 打包后 build/ 不会进入 app.asar：图标通过 electron-builder 的 extraResources 复制到 resources/，开发模式回退到项目 build/ 目录。
+function resolveIcon(): string | null {
+  const file = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  const packaged = path.join(process.resourcesPath, file);
+  if (existsSync(packaged)) return packaged;
+  const dev = path.join(directory, '..', '..', 'build', file);
+  return existsSync(dev) ? dev : null;
+}
+const iconPath = resolveIcon();
+const windowIcon = iconPath ? { icon: iconPath } : {};
 if (process.env.PLAINOTE_DATA_DIR) app.setPath('userData', process.env.PLAINOTE_DATA_DIR);
 app.setName('素记');
 let window: BrowserWindow | null = null, vault: VaultService | null = null;
@@ -227,7 +235,7 @@ void app.whenReady().then(async () => {
     { label: '视图', submenu: [{ role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { role: 'togglefullscreen' }] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menu));
-  if (process.platform === 'darwin' && existsSync(iconPath)) app.dock?.setIcon(iconPath);
+  if (process.platform === 'darwin' && iconPath) app.dock?.setIcon(iconPath);
   createWindow();
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });

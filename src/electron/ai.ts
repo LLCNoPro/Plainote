@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import type { AiChatMessage, AiConfig, AiContext, AiNoteContext, AiSearchHit } from '../shared/ai.ts';
 import { VaultError } from './vault.ts';
 
-export const DEFAULT_AI_CONFIG: AiConfig = { baseUrl: 'https://api.deepseek.com/anthropic', apiKey: '', model: 'deepseek-chat' };
+export const DEFAULT_AI_CONFIG: AiConfig = { baseUrl: 'https://api.deepseek.com/anthropic', apiKey: '', model: 'deepseek-chat', protocol: 'anthropic' };
 
 // 读取 preferences.json 里的 ai 字段，缺失时返回默认配置。
 export async function readAiConfig(preferencesPath: string): Promise<AiConfig> {
@@ -22,6 +22,7 @@ export async function saveAiConfig(preferencesPath: string, config: AiConfig): P
     baseUrl: typeof config.baseUrl === 'string' && config.baseUrl.trim() ? config.baseUrl.trim() : DEFAULT_AI_CONFIG.baseUrl,
     apiKey: typeof config.apiKey === 'string' ? config.apiKey.trim() : '',
     model: typeof config.model === 'string' && config.model.trim() ? config.model.trim() : DEFAULT_AI_CONFIG.model,
+    protocol: config.protocol === 'openai' ? 'openai' : 'anthropic',
   };
   await writeFile(preferencesPath, JSON.stringify({ ...existing, ai }), 'utf8');
 }
@@ -70,22 +71,8 @@ function buildSystem(context: AiContext): string {
   return parts.join('\n\n');
 }
 
-// 调用 DeepSeek（Anthropic 兼容接口）并流式回调增量文本。用 signal 支持中断。
-export async function streamChat(config: AiConfig, messages: AiChatMessage[], context: AiContext, onDelta: (text: string) => void, signal: AbortSignal): Promise<void> {
-  if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
-  const body = {
-    model: config.model || DEFAULT_AI_CONFIG.model,
-    max_tokens: 4096,
-    stream: true,
-    system: buildSystem(context),
-    messages: messages.map(m => ({ role: m.role, content: m.content })),
-  };
-  const response = await fetch(`${config.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify(body),
-    signal,
-  });
+// 读取 SSE 响应体并按行回调（每行去掉行尾换行）。用 signal 支持中断。
+async function consumeSse(response: Response, onLine: (line: string) => void): Promise<void> {
   if (!response.ok || !response.body) {
     const text = await response.text().catch(() => '');
     throw new VaultError('AI_ERROR', `AI 请求失败（HTTP ${response.status}）：${text.slice(0, 200) || '无响应体'}`);
@@ -99,14 +86,67 @@ export async function streamChat(config: AiConfig, messages: AiChatMessage[], co
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (!data) continue;
-      let event: { type?: string; delta?: { type?: string; text?: string }; error?: { message?: string } };
-      try { event = JSON.parse(data); } catch { continue; }
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) onDelta(event.delta.text);
-      else if (event.type === 'error') throw new VaultError('AI_ERROR', 'AI 请求失败：' + (event.error?.message || '未知错误'));
-    }
+    for (const line of lines) onLine(line);
   }
+  if (buffer.trim()) onLine(buffer);
+}
+
+// 调用 Anthropic 兼容接口（DeepSeek 官方 /v1/messages）并流式回调增量文本。
+async function streamAnthropic(baseUrl: string, config: AiConfig, messages: AiChatMessage[], context: AiContext, onDelta: (text: string) => void, signal: AbortSignal): Promise<void> {
+  const body = {
+    model: config.model || DEFAULT_AI_CONFIG.model,
+    max_tokens: 4096,
+    stream: true,
+    system: buildSystem(context),
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+  };
+  const response = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  await consumeSse(response, line => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data) return;
+    let event: { type?: string; delta?: { type?: string; text?: string }; error?: { message?: string } };
+    try { event = JSON.parse(data); } catch { return; }
+    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) onDelta(event.delta.text);
+    else if (event.type === 'error') throw new VaultError('AI_ERROR', 'AI 请求失败：' + (event.error?.message || '未知错误'));
+  });
+}
+
+// 调用 OpenAI 兼容接口（/v1/chat/completions，如内网 vLLM/自建服务）并流式回调增量文本。
+async function streamOpenAi(baseUrl: string, config: AiConfig, messages: AiChatMessage[], context: AiContext, onDelta: (text: string) => void, signal: AbortSignal): Promise<void> {
+  const body = {
+    model: config.model || DEFAULT_AI_CONFIG.model,
+    stream: true,
+    stream_options: { include_usage: true },
+    messages: [{ role: 'system', content: buildSystem(context) }, ...messages.map(m => ({ role: m.role, content: m.content }))],
+  };
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.apiKey}` },
+    body: JSON.stringify(body),
+    signal,
+  });
+  await consumeSse(response, line => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let event: { error?: { message?: string }; choices?: { delta?: { content?: string } }[] };
+    try { event = JSON.parse(data); } catch { return; }
+    if (event.error) throw new VaultError('AI_ERROR', 'AI 请求失败：' + (event.error.message || '未知错误'));
+    const text = event.choices?.[0]?.delta?.content;
+    if (typeof text === 'string' && text) onDelta(text);
+  });
+}
+
+// 调用 AI 接口并流式回调增量文本。用 signal 支持中断。
+export async function streamChat(config: AiConfig, messages: AiChatMessage[], context: AiContext, onDelta: (text: string) => void, signal: AbortSignal): Promise<void> {
+  if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
+  const baseUrl = config.baseUrl.replace(/\/+$/, '');
+  if (config.protocol === 'openai') await streamOpenAi(baseUrl, config, messages, context, onDelta, signal);
+  else await streamAnthropic(baseUrl, config, messages, context, onDelta, signal);
 }

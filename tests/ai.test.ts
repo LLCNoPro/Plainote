@@ -21,8 +21,8 @@ test('检索按关键词打分并返回相关笔记', () => {
 test('AI 配置读写往返并保留其它字段', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'plainote-ai-'));
   const file = path.join(dir, 'preferences.json');
-  await saveAiConfig(file, { baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'sk-test', model: 'deepseek-chat' });
-  assert.deepEqual(await readAiConfig(file), { baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'sk-test', model: 'deepseek-chat' });
+  await saveAiConfig(file, { baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'sk-test', model: 'deepseek-chat', protocol: 'anthropic' });
+  assert.deepEqual(await readAiConfig(file), { baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'sk-test', model: 'deepseek-chat', protocol: 'anthropic' });
   const raw = JSON.parse(await readFile(file, 'utf8'));
   assert.equal(raw.ai.apiKey, 'sk-test');
 });
@@ -38,11 +38,29 @@ test('流式解析 content_block_delta 增量', async () => {
   globalThis.fetch = (async () => ({ ok: true, body: new ReadableStream({ start(c) { for (const chunk of chunks) c.enqueue(encoder.encode(chunk)); c.close(); } }), text: async () => '' })) as unknown as typeof fetch;
   const received: string[] = [];
   try {
-    await streamChat({ baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'sk', model: 'deepseek-chat' }, [{ role: 'user', content: 'hi' }], {}, text => received.push(text), new AbortController().signal);
+    await streamChat({ baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'sk', model: 'deepseek-chat', protocol: 'anthropic' }, [{ role: 'user', content: 'hi' }], {}, text => received.push(text), new AbortController().signal);
+  } finally { globalThis.fetch = originalFetch; }
+  assert.deepEqual(received, ['你好', '，世界']);
+});
+
+test('流式解析 OpenAI chat.completions 增量', async () => {
+  const chunks = [
+    'data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}\n\n',
+    'data: {"choices":[{"index":0,"delta":{"content":"你好"},"finish_reason":null}]}\n\n',
+    'data: {"choices":[{"index":0,"delta":{"content":"，世界"},"finish_reason":null}]}\n\n',
+    'data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n',
+    'data: [DONE]\n\n',
+  ];
+  const encoder = new TextEncoder();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({ ok: true, body: new ReadableStream({ start(c) { for (const chunk of chunks) c.enqueue(encoder.encode(chunk)); c.close(); } }), text: async () => '' })) as unknown as typeof fetch;
+  const received: string[] = [];
+  try {
+    await streamChat({ baseUrl: 'http://10.0.0.1:9830/v1', apiKey: 'sk', model: 'DeepSeek-V3', protocol: 'openai' }, [{ role: 'user', content: 'hi' }], {}, text => received.push(text), new AbortController().signal);
   } finally { globalThis.fetch = originalFetch; }
   assert.deepEqual(received, ['你好', '，世界']);
 });
 
 test('未配置 API Key 抛出 AI_NOT_CONFIGURED', async () => {
-  await assert.rejects(streamChat({ baseUrl: '', apiKey: '', model: '' }, [], {}, () => {}, new AbortController().signal), { code: 'AI_NOT_CONFIGURED' });
+  await assert.rejects(streamChat({ baseUrl: '', apiKey: '', model: '', protocol: 'anthropic' }, [], {}, () => {}, new AbortController().signal), { code: 'AI_NOT_CONFIGURED' });
 });

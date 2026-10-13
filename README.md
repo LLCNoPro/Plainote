@@ -95,7 +95,7 @@ Mac 使用 ⌘，Windows 使用 Ctrl：`O` 打开笔记库、`P` 快速打开、
 
 右侧「AI 对话」面板把整个笔记库当作一个项目来回答：
 
-- 对接 **DeepSeek**（Anthropic 兼容接口），在「设置 → AI」配置 API 地址 / Key / 模型（默认 `https://api.deepseek.com/anthropic`、`deepseek-chat`）。
+- 对接 **DeepSeek**（Anthropic 兼容接口）或任意 **OpenAI 兼容**服务，在「设置 → AI」配置接口协议 / API 地址 / Key / 模型（默认 `https://api.deepseek.com/anthropic`、`deepseek-chat`、Anthropic 兼容）。
 - 每次提问自动检索整个笔记库，取最相关笔记全文作为上下文；`AGENT.md` 作为项目概览始终注入；回答参考笔记时在末尾标注相对路径来源（如 `来源：周会.md`）。
 - 快捷指令：总结 / 续写 / 润色 / 翻译；助手回复按 Markdown 渲染，可一键「插入到笔记」。
 - 首次提问若 `AGENT.md` 不存在会自动生成；`/restore` 或「整理索引」可重新生成。`AGENT.md` 不出现在文件树中。
