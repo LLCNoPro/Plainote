@@ -2,7 +2,7 @@ export interface NoteFile { path: string; name: string; modified: number; size: 
 export interface NoteSnapshot { path: string; content: string; revision: string; modified: number }
 export interface RecoverySnapshot { path: string; content: string; baseRevision: string; savedAt: number }
 export interface VaultInfo { root: string; name: string; files: NoteFile[]; directories: string[] }
-export type ErrorCode = 'CONFLICT' | 'INVALID_PATH' | 'NOT_FOUND' | 'EXISTS' | 'IO' | 'NO_VAULT' | 'TOO_LARGE';
+export type ErrorCode = 'CONFLICT' | 'INVALID_PATH' | 'NOT_FOUND' | 'EXISTS' | 'IO' | 'NO_VAULT' | 'TOO_LARGE' | 'PANDOC_NOT_FOUND';
 export type Result<T> = { ok: true; value: T } | { ok: false; error: { code: ErrorCode; message: string } };
 export interface PlainoteBridge {
   platform: string;
@@ -11,6 +11,7 @@ export interface PlainoteBridge {
   directories(): Promise<Result<string[]>>;
   createDirectory(path: string): Promise<Result<void>>;
   rename(path: string, newPath: string): Promise<Result<void>>;
+  exportDocx(content: string, sourcePath: string, pandocPath: string): Promise<Result<string | null>>;
   trash(path: string, revision: string): Promise<Result<void>>;
   scan(): Promise<Result<NoteFile[]>>;
   read(path: string): Promise<Result<NoteSnapshot>>;

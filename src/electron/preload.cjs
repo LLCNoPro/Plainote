@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('plainote', {
   directories: () => invoke('directories'),
   createDirectory: path => invoke('create-directory', path),
   rename: (path, newPath) => invoke('rename', path, newPath),
+  exportDocx: (content, sourcePath, pandocPath) => invoke('export-docx', content, sourcePath, pandocPath),
   trash: (path, revision) => invoke('trash', path, revision),
   scan: () => invoke('scan'), read: path => invoke('read', path),
   save: (path, content, revision) => invoke('save', path, content, revision),

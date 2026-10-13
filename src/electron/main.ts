@@ -2,8 +2,11 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { VaultService, VaultError } from './vault.ts';
 import type { Result, VaultInfo } from '../shared/types.ts';
 
@@ -65,6 +68,42 @@ register('stage-recovery', (relative: string, content: string, revision: string)
 register('get-recovery', (relative: string) => requireVault().getRecovery(relative));
 register('recoveries', () => requireVault().listRecovery());
 register('clear-recovery', (relative: string) => requireVault().clearRecovery(relative));
+
+function runPandoc(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, args);
+    let stderr = '';
+    proc.stderr.on('data', chunk => { stderr += chunk; });
+    proc.on('error', error => reject(new VaultError('IO', '无法运行 Pandoc：' + error.message)));
+    proc.on('close', code => { if (code === 0) resolve(); else reject(new VaultError('IO', 'Pandoc 转换失败：' + (stderr.trim() || '未知错误'))); });
+  });
+}
+function pandocAvailable(cmd: string): Promise<boolean> {
+  return new Promise(resolve => {
+    let stdout = '';
+    const proc = spawn(cmd, ['--version']);
+    proc.stdout.on('data', chunk => { stdout += chunk; });
+    proc.on('error', () => resolve(false));
+    const timer = setTimeout(() => { proc.kill(); resolve(false); }, 8000);
+    proc.on('close', code => { clearTimeout(timer); resolve(code === 0 && /pandoc/i.test(stdout)); });
+  });
+}
+async function exportDocx(content: string, sourcePath: string, pandocPath: string): Promise<string | null> {
+  const cmd = pandocPath.trim() || 'pandoc';
+  if (!await pandocAvailable(cmd)) throw new VaultError('PANDOC_NOT_FOUND', '未找到 Pandoc，请在设置中配置 pandoc 路径。');
+  const defaultName = (path.basename(sourcePath || '笔记') || '笔记').replace(/\.md$/i, '') + '.docx';
+  const result = await dialog.showSaveDialog(window!, { title: '导出 DOCX', defaultPath: defaultName, filters: [{ name: 'Word 文档', extensions: ['docx'] }] });
+  if (result.canceled || !result.filePath) return null;
+  const temporary = path.join(tmpdir(), 'plainote-' + randomUUID() + '.md');
+  await writeFile(temporary, content, 'utf8');
+  try { await runPandoc(cmd, [temporary, '-o', result.filePath]); }
+  finally { await rm(temporary, { force: true }); }
+  return result.filePath;
+}
+register('export-docx', (content: string, sourcePath: string, pandocPath: string) => {
+  if (typeof content !== 'string' || typeof sourcePath !== 'string' || typeof pandocPath !== 'string') throw new VaultError('INVALID_PATH', '导出参数无效。');
+  return exportDocx(content, sourcePath, pandocPath);
+});
 
 async function closeDecision(message: string, requestId: number) {
   if (!window || window.isDestroyed() || !closePending || requestId !== closeAttempt || closePromptOpen) return;
