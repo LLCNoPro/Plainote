@@ -3,10 +3,13 @@ import type { IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { VaultService, VaultError } from './vault.ts';
 import type { Result, VaultInfo } from '../shared/types.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
+const iconPath = path.join(directory, '..', '..', 'build', 'icon.png');
+const windowIcon = existsSync(iconPath) ? { icon: iconPath } : {};
 if (process.env.PLAINOTE_DATA_DIR) app.setPath('userData', process.env.PLAINOTE_DATA_DIR);
 app.setName('素记');
 let window: BrowserWindow | null = null, vault: VaultService | null = null;
@@ -88,7 +91,7 @@ for (const channel of ['minimize', 'maximize', 'close']) ipcMain.on('plainote:' 
 });
 function createWindow() {
   mayClose = false; closePending = false; closePromptOpen = false;
-  window = new BrowserWindow({ width: 1440, height: 920, minWidth: 900, minHeight: 620, title: '素记 Plainote', backgroundColor: '#fcfaf6', titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden', trafficLightPosition: { x: 16, y: 15 }, webPreferences: { preload: path.join(directory, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  window = new BrowserWindow({ width: 1440, height: 920, minWidth: 900, minHeight: 620, title: '素记 Plainote', backgroundColor: '#fcfaf6', titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden', trafficLightPosition: { x: 16, y: 15 }, ...windowIcon, webPreferences: { preload: path.join(directory, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, target) => { if (target !== window?.webContents.getURL()) event.preventDefault(); });
   if (process.env.PLAINOTE_DEV_URL) void window.loadURL(process.env.PLAINOTE_DEV_URL);
@@ -116,6 +119,7 @@ void app.whenReady().then(async () => {
     { label: '视图', submenu: [{ role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { role: 'togglefullscreen' }] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menu));
+  if (process.platform === 'darwin' && existsSync(iconPath)) app.dock?.setIcon(iconPath);
   createWindow();
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });
