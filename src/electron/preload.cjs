@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('plainote', {
   aiIndex: () => invoke('ai-index'),
   aiCancel: sessionId => invoke('ai-cancel', sessionId),
   onAiToken: callback => subscribe('ai-token', callback),
+  onAiStatus: callback => subscribe('ai-status', callback),
   onAiDone: callback => subscribe('ai-done', callback),
   onAiError: callback => subscribe('ai-error', callback),
   trash: (path, revision) => invoke('trash', path, revision),

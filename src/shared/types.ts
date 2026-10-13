@@ -20,6 +20,7 @@ export interface PlainoteBridge {
   aiIndex(): Promise<Result<string>>;
   aiCancel(sessionId: string): Promise<Result<void>>;
   onAiToken(callback: (sessionId: string, text: string) => void): () => void;
+  onAiStatus(callback: (sessionId: string, message: string) => void): () => void;
   onAiDone(callback: (sessionId: string) => void): () => void;
   onAiError(callback: (sessionId: string, message: string) => void): () => void;
   trash(path: string, revision: string): Promise<Result<void>>;

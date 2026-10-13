@@ -124,6 +124,7 @@ register('ai-search', async (query: string) => {
   return searchNotes(query, notes);
 });
 const aiSessions = new Map<string, AbortController>();
+function aiStatus(sessionId: string, message: string) { window?.webContents.send('plainote:ai-status', sessionId, message); }
 async function readAllNotes(vault: VaultService): Promise<AiNoteContext[]> {
   const files = (await vault.scan()).slice(0, 200);
   return Promise.all(files.map(async f => { const n = await vault.read(f.path); return { path: f.path, name: f.name, content: n.content }; }));
@@ -137,9 +138,10 @@ async function writeIndex(vault: VaultService, content: string): Promise<void> {
   catch (error) { if (error instanceof VaultError && error.code === 'NOT_FOUND') await vault.create(INDEX_FILE, content); else throw error; }
 }
 const INDEX_PROMPT = '请整理这个笔记库，生成一份项目概览（AGENT.md）：按主题归纳各笔记，说明每篇的内容摘要与相互关联。';
-async function ensureIndex(config: AiConfig, vault: VaultService): Promise<string> {
+async function ensureIndex(config: AiConfig, vault: VaultService, onGenerating?: () => void): Promise<string> {
   const existing = await readIndex(vault);
   if (existing !== null) return existing;
+  onGenerating?.();
   let full = '';
   await streamChat(config, [{ role: 'user', content: INDEX_PROMPT }], { retrieved: await readAllNotes(vault) }, text => { full += text; }, new AbortController().signal);
   await writeIndex(vault, full);
@@ -150,17 +152,24 @@ register('ai-chat', async (messages: AiChatMessage[], context: AiContext) => {
   const config = await readAiConfig(userFile());
   if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
   const vault = requireVault();
-  const index = await ensureIndex(config, vault);
-  const query = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
-  const notes = await readAllNotes(vault);
-  const retrieved = searchNotes(query, notes, 6).map(h => ({ path: h.path, name: h.name, content: h.content }));
-  const fullContext: AiContext = { ...context, index, retrieved: retrieved.length ? retrieved : undefined };
   const sessionId = randomUUID();
   const controller = new AbortController();
   aiSessions.set(sessionId, controller);
-  void streamChat(config, messages, fullContext, text => window?.webContents.send('plainote:ai-token', sessionId, text), controller.signal)
-    .then(() => { aiSessions.delete(sessionId); window?.webContents.send('plainote:ai-done', sessionId); })
-    .catch(error => { aiSessions.delete(sessionId); window?.webContents.send('plainote:ai-error', sessionId, error instanceof VaultError ? error.message : 'AI 请求失败。'); });
+  void (async () => {
+    try {
+      const index = await ensureIndex(config, vault, () => aiStatus(sessionId, '首次使用：正在整理笔记库并生成 AGENT.md 概览，请稍候…'));
+      const query = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
+      const notes = await readAllNotes(vault);
+      const retrieved = searchNotes(query, notes, 6).map(h => ({ path: h.path, name: h.name, content: h.content }));
+      const fullContext: AiContext = { ...context, index, retrieved: retrieved.length ? retrieved : undefined };
+      await streamChat(config, messages, fullContext, text => window?.webContents.send('plainote:ai-token', sessionId, text), controller.signal);
+      aiSessions.delete(sessionId);
+      window?.webContents.send('plainote:ai-done', sessionId);
+    } catch (error) {
+      aiSessions.delete(sessionId);
+      window?.webContents.send('plainote:ai-error', sessionId, error instanceof VaultError ? error.message : 'AI 请求失败。');
+    }
+  })();
   return sessionId;
 });
 register('ai-index', async () => {
