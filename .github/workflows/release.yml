@@ -37,6 +37,8 @@ jobs:
           cache: npm
       - name: 安装依赖
         run: npm ci
+      - name: 从 tag 取版本号
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
       - name: 构建渲染层与主进程
         run: npm run build
       - name: 打包
