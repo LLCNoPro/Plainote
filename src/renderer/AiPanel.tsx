@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import MarkdownIt from 'markdown-it';
 import type { AiChatMessage, AiContext, AiNoteContext, AiSearchHit } from '../shared/ai.ts';
 import type { PlainoteBridge } from '../shared/types.ts';
+
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 
 interface Message { role: 'user' | 'assistant'; content: string; streaming?: boolean; }
 
@@ -79,7 +82,7 @@ export function AiPanel({ bridge, note, getSelection, onInsert, onConfigMissing 
   return <div className="ai-panel">
     <div className="ai-messages" ref={listRef}>
       {messages.length === 0 && <p className="empty-label">向 AI 提问，或使用快捷指令。当前笔记与选中文本会自动带入上下文。</p>}
-      {messages.map((m, i) => <div key={i} className={'ai-msg ' + m.role + (m.streaming ? ' streaming' : '')}><div className="ai-msg-text">{m.content}</div>{m.role === 'assistant' && !m.streaming && m.content && <button className="ai-insert" onClick={() => onInsert(m.content)}>插入到笔记</button>}</div>)}
+      {messages.map((m, i) => <div key={i} className={'ai-msg ' + m.role + (m.streaming ? ' streaming' : '')}>{m.role === 'assistant' ? <div className="ai-msg-text ai-md" dangerouslySetInnerHTML={{ __html: md.render(m.content) }} /> : <div className="ai-msg-text">{m.content}</div>}{m.role === 'assistant' && !m.streaming && m.content && <button className="ai-insert" onClick={() => onInsert(m.content)}>插入到笔记</button>}</div>)}
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {retrieved.length > 0 && <div className="ai-context-tags">{retrieved.map(n => <span key={n.path} className="ai-tag">{n.name}<button aria-label={'移除上下文 ' + n.name} onClick={() => setRetrieved(retrieved.filter(r => r.path !== n.path))}>×</button></span>)}</div>}
