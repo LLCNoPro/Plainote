@@ -3,6 +3,7 @@ import { open, lstat, readdir, realpath, mkdir, readFile, rename, rm } from 'nod
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ErrorCode, NoteFile, NoteSnapshot, RecoverySnapshot } from '../shared/types.ts';
+import { INDEX_FILE } from '../shared/ai.ts';
 
 const hash = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
 export class VaultError extends Error {
@@ -49,6 +50,7 @@ export class VaultService {
         const relative = prefix + entry.name;
         if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative + '/');
         else if (entry.isFile() && /\.md$/i.test(entry.name)) {
+          if (relative.toLowerCase() === INDEX_FILE.toLowerCase()) continue;
           try {
             const stat = await lstat(path.join(directory, entry.name));
             if (stat.isFile() && !stat.isSymbolicLink()) result.push({ path: relative, name: entry.name.replace(/\.md$/i, ''), modified: stat.mtimeMs, size: stat.size });

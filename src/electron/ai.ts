@@ -61,11 +61,12 @@ export function searchNotes(query: string, notes: AiNoteContext[], limit = 5): A
 }
 
 function buildSystem(context: AiContext): string {
-  const parts = ['你是「素记」本地 Markdown 笔记库的 AI 助手。把整个笔记库当作一个项目看待，综合检索到的相关笔记回答。回答使用中文，内容使用 Markdown 格式。'];
+  const parts = ['你是「素记」本地 Markdown 笔记库的 AI 助手。把整个笔记库当作一个项目看待。回答使用中文，内容使用 Markdown 格式。'];
+  if (context.index) parts.push('【项目概览（AGENT.md）】\n' + context.index);
   if (context.currentNote) parts.push(`【当前笔记：${context.currentNote.name}】\n${context.currentNote.content}`);
   if (context.selection) parts.push(`【用户选中的文本】\n${context.selection}`);
-  if (context.retrieved?.length) parts.push('【从笔记库检索到的相关笔记】\n' + context.retrieved.map(n => `### ${n.name}\n${n.content}`).join('\n\n'));
-  parts.push('回答指引：默认综合【相关笔记】与【当前笔记】回答；仅当用户明确要求「基于当前笔记」时，才只参考【当前笔记】。');
+  if (context.retrieved?.length) parts.push('【从笔记库检索到的相关笔记】\n' + context.retrieved.map(n => `### ${n.name}（${n.path}）\n${n.content}`).join('\n\n'));
+  parts.push('回答指引：默认综合【项目概览】【相关笔记】【当前笔记】回答；仅当用户明确要求「基于当前笔记」时，才只参考【当前笔记】。如果回答内容参考了某篇笔记，请在回答末尾列出该笔记的相对路径，格式如：`来源：周会.md`。');
   return parts.join('\n\n');
 }
 

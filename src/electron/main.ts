@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { VaultService, VaultError } from './vault.ts';
 import { readAiConfig, saveAiConfig, searchNotes, streamChat } from './ai.ts';
-import type { AiChatMessage, AiConfig, AiContext } from '../shared/ai.ts';
+import { INDEX_FILE } from '../shared/ai.ts';
+import type { AiChatMessage, AiConfig, AiContext, AiNoteContext } from '../shared/ai.ts';
 import type { Result, VaultInfo } from '../shared/types.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -115,16 +116,37 @@ register('ai-search', async (query: string) => {
   return searchNotes(query, notes);
 });
 const aiSessions = new Map<string, AbortController>();
+async function readAllNotes(vault: VaultService): Promise<AiNoteContext[]> {
+  const files = (await vault.scan()).slice(0, 200);
+  return Promise.all(files.map(async f => { const n = await vault.read(f.path); return { path: f.path, name: f.name, content: n.content }; }));
+}
+async function readIndex(vault: VaultService): Promise<string | null> {
+  try { return (await vault.read(INDEX_FILE)).content; }
+  catch (error) { if (error instanceof VaultError && error.code === 'NOT_FOUND') return null; throw error; }
+}
+async function writeIndex(vault: VaultService, content: string): Promise<void> {
+  try { const cur = await vault.read(INDEX_FILE); await vault.save(INDEX_FILE, content, cur.revision); }
+  catch (error) { if (error instanceof VaultError && error.code === 'NOT_FOUND') await vault.create(INDEX_FILE, content); else throw error; }
+}
+const INDEX_PROMPT = '请整理这个笔记库，生成一份项目概览（AGENT.md）：按主题归纳各笔记，说明每篇的内容摘要与相互关联。';
+async function ensureIndex(config: AiConfig, vault: VaultService): Promise<string> {
+  const existing = await readIndex(vault);
+  if (existing !== null) return existing;
+  let full = '';
+  await streamChat(config, [{ role: 'user', content: INDEX_PROMPT }], { retrieved: await readAllNotes(vault) }, text => { full += text; }, new AbortController().signal);
+  await writeIndex(vault, full);
+  return full;
+}
 register('ai-chat', async (messages: AiChatMessage[], context: AiContext) => {
   if (!Array.isArray(messages) || typeof context !== 'object' || context === null) throw new VaultError('INVALID_PATH', '聊天参数无效。');
   const config = await readAiConfig(userFile());
   if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
-  const query = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
   const vault = requireVault();
-  const files = (await vault.scan()).slice(0, 200);
-  const notes = await Promise.all(files.map(async f => { const n = await vault.read(f.path); return { path: f.path, name: f.name, content: n.content }; }));
+  const index = await ensureIndex(config, vault);
+  const query = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
+  const notes = await readAllNotes(vault);
   const retrieved = searchNotes(query, notes, 6).map(h => ({ path: h.path, name: h.name, content: h.content }));
-  const fullContext: AiContext = { ...context, retrieved: retrieved.length ? retrieved : undefined };
+  const fullContext: AiContext = { ...context, index, retrieved: retrieved.length ? retrieved : undefined };
   const sessionId = randomUUID();
   const controller = new AbortController();
   aiSessions.set(sessionId, controller);
@@ -137,18 +159,13 @@ register('ai-index', async () => {
   const config = await readAiConfig(userFile());
   if (!config.apiKey) throw new VaultError('AI_NOT_CONFIGURED', '请先在设置中配置 AI API Key。');
   const vault = requireVault();
-  const files = (await vault.scan()).filter(f => f.path !== 'AGENT.md').slice(0, 200);
-  const notes = await Promise.all(files.map(async f => { const n = await vault.read(f.path); return { path: f.path, name: f.name, content: n.content }; }));
+  const notes = await readAllNotes(vault);
   const sessionId = randomUUID();
   const controller = new AbortController();
   let full = '';
-  void streamChat(config, [{ role: 'user', content: '请整理这个笔记库，生成一份项目概览（AGENT.md）：按主题归纳各笔记，说明每篇的内容摘要与相互关联。' }], { retrieved: notes }, text => { full += text; window?.webContents.send('plainote:ai-token', sessionId, text); }, controller.signal)
+  void streamChat(config, [{ role: 'user', content: INDEX_PROMPT }], { retrieved: notes }, text => { full += text; window?.webContents.send('plainote:ai-token', sessionId, text); }, controller.signal)
     .then(async () => {
-      try {
-        const exists = (await vault.scan()).some(f => f.path === 'AGENT.md');
-        if (exists) { const cur = await vault.read('AGENT.md'); await vault.save('AGENT.md', full, cur.revision); }
-        else await vault.create('AGENT.md', full);
-      } catch { /* 索引写入失败不阻断流式结果 */ }
+      try { await writeIndex(vault, full); } catch { /* 索引写入失败不阻断流式结果 */ }
       aiSessions.delete(sessionId);
       window?.webContents.send('plainote:ai-done', sessionId);
     })
