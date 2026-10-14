@@ -22,6 +22,13 @@ function resolveIcon(): string | null {
   const dev = path.join(directory, '..', '..', 'build', file);
   return existsSync(dev) ? dev : null;
 }
+// Pandoc 模板经 extraResources 复制到 resources/pandoc/，开发模式回退到项目 resources/pandoc/ 目录。
+function resolveTemplate(name: string): string | null {
+  const packaged = path.join(process.resourcesPath, 'pandoc', name);
+  if (existsSync(packaged)) return packaged;
+  const dev = path.join(directory, '..', '..', 'resources', 'pandoc', name);
+  return existsSync(dev) ? dev : null;
+}
 const iconPath = resolveIcon();
 const windowIcon = iconPath ? { icon: iconPath } : {};
 if (process.env.PLAINOTE_DATA_DIR) app.setPath('userData', process.env.PLAINOTE_DATA_DIR);
@@ -107,7 +114,11 @@ async function exportDocx(content: string, sourcePath: string, pandocPath: strin
   if (result.canceled || !result.filePath) return null;
   const temporary = path.join(tmpdir(), 'plainote-' + randomUUID() + '.md');
   await writeFile(temporary, content, 'utf8');
-  try { await runPandoc(cmd, [temporary, '-o', result.filePath]); }
+  const reference = resolveTemplate('reference.docx');
+  const args = [temporary];
+  if (reference) args.push('--reference-doc', reference);
+  args.push('-o', result.filePath);
+  try { await runPandoc(cmd, args); }
   finally { await rm(temporary, { force: true }); }
   return result.filePath;
 }

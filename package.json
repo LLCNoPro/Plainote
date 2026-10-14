@@ -33,7 +33,8 @@
     ],
     "extraResources": [
       { "from": "build/icon.png", "to": "icon.png" },
-      { "from": "build/icon.ico", "to": "icon.ico" }
+      { "from": "build/icon.ico", "to": "icon.ico" },
+      { "from": "resources/pandoc", "to": "pandoc" }
     ],
     "mac": {
       "target": "dmg",
