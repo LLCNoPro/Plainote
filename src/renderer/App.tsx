@@ -39,7 +39,7 @@ function FileTree({ files, directories, selectedDirectory, active, open, remove,
 export function App() {
   const bridge = window.plainote;
   const [vault, setVault] = useState<VaultInfo | null>(null), [files, setFiles] = useState<NoteFile[]>([]), [active, setActive] = useState('');
-  const [busy, setBusy] = useState(true), [message, setMessage] = useState(''), [mode, setMode] = useState<EditorMode>('live');
+  const [busy, setBusy] = useState(true), [message, setMessage] = useState(''), [messageKind, setMessageKind] = useState<'info' | 'error'>('info'), [mode, setMode] = useState<EditorMode>('live');
   const [theme, setTheme] = useState(() => localStorage.getItem('plainote-theme') || 'light');
   const [accent, setAccent] = useState(() => localStorage.getItem('plainote-accent') || 'teal');
   const [pandocPath, setPandocPath] = useState(() => localStorage.getItem('plainote-pandoc') || '');
@@ -64,7 +64,7 @@ export function App() {
   const activeSession = sessions.current.get(active);
   const command = bridge?.platform === 'darwin' ? '⌘' : 'Ctrl';
   const select = (p: string) => { activeRef.current = p; setActive(p); if (p) setSelectedDirectory(p.includes('/') ? p.slice(0,p.lastIndexOf('/')) : ''); };
-  const explain = (text: string) => { setMessage(text); };
+  const explain = (text: string, kind: 'info' | 'error' = 'info') => { setMessage(text); setMessageKind(kind); };
   const refreshFiles = async () => {
     if (!bridge) return;
     const token = generation.current, result = await bridge.scan();
@@ -102,7 +102,7 @@ export function App() {
     const result = await pending;
     if (pendingOpens.current.get(p) === pending) pendingOpens.current.delete(p);
     if (token !== generation.current || noteEpochs.current.get(p) !== epoch) return;
-    if (!result.ok) { explain(result.error.message); return; }
+    if (!result.ok) { explain(result.error.message, 'error'); return; }
     if (!sessions.current.has(p)) addSession(result.value);
     if (request !== selectionRequest.current) return;
     select(p); setMessage('');
@@ -134,8 +134,8 @@ export function App() {
     if (!bridge || busy || transition.current || pendingCreate.current) return;
     transition.current = true; setBusy(true);
     try {
-      if (!await flushAll()) { explain('还有笔记未能保存，请先处理保存错误或保留副本，再切换笔记库。'); return; }
-      const result = await bridge.chooseVault(); if (result.ok && result.value) await attachVault(result.value); else if (!result.ok) explain(result.error.message);
+      if (!await flushAll()) { explain('还有笔记未能保存，请先处理保存错误或保留副本，再切换笔记库。', 'error'); return; }
+      const result = await bridge.chooseVault(); if (result.ok && result.value) await attachVault(result.value); else if (!result.ok) explain(result.error.message, 'error');
     } finally { transition.current = false; setBusy(false); }
   };
   const openCreate = (content = '', original?: string, recoveryPath?: string) => {
@@ -187,7 +187,7 @@ export function App() {
     const token = generation.current, session = sessions.current.get(p);
     const result = session ? { ok: true as const, value: { revision: session.revision, content: session.content } } : await bridge.read(p);
     if (token !== generation.current || transition.current || pendingCreate.current) return;
-    if (!result.ok) { explain(result.error.message); return; }
+    if (!result.ok) { explain(result.error.message, 'error'); return; }
     setFormError(''); setModal({ type: 'delete', notePath: p, revision: result.value.revision, content: result.value.content });
   };
   const deleteNote = () => {
@@ -247,7 +247,7 @@ export function App() {
     const result = await bridge.exportDocx(activeSession.content, activeSession.path, pandocPath);
     if (!result.ok) {
       if (result.error.code === 'PANDOC_NOT_FOUND') setModal({ type: 'settings', prompt: '未找到 Pandoc，请在下方配置 pandoc 路径后再导出。' });
-      else explain(result.error.message);
+      else explain(result.error.message, 'error');
       return;
     }
     if (result.value) explain('已导出 Word 文档：' + result.value);
@@ -270,7 +270,7 @@ export function App() {
     if (!bridge || !activeSession || transition.current) return;
     const result = await bridge.read(activeSession.path);
     if (result.ok) setModal({ type: 'conflict', notePath: activeSession.path, disk: result.value });
-    else explain(result.error.message);
+    else explain(result.error.message, 'error');
   };
   const useDisk = async (notePath: string, snapshot: NoteSnapshot) => {
     if (transition.current) return;
@@ -280,15 +280,20 @@ export function App() {
   const closeTab = async (p: string) => {
     const session = sessions.current.get(p); if (!session) return;
     clearTimeout(timers.current.get(p));
-    if (!await session.flush()) { select(p); explain('这篇笔记还未保存。请重试，或把当前内容保留为副本。'); return; }
+    if (!await session.flush()) { select(p); explain('这篇笔记还未保存。请重试，或把当前内容保留为副本。', 'error'); return; }
     sessions.current.delete(p);
     if (active === p) select(sessions.current.keys().next().value || ''); refresh();
   };
   useEffect(() => {
     mounted.current = true;
-    void (async () => { if (bridge) { const result = await bridge.currentVault(); if (result.ok && result.value) await attachVault(result.value); else if (!result.ok) explain(result.error.message); } setBusy(false); })();
+    void (async () => { if (bridge) { const result = await bridge.currentVault(); if (result.ok && result.value) await attachVault(result.value); else if (!result.ok) explain(result.error.message, 'error'); } setBusy(false); })();
     return () => { mounted.current = false; for (const timer of timers.current.values()) clearTimeout(timer); };
   }, []);
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(''), 4000);
+    return () => clearTimeout(timer);
+  }, [message]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('plainote-theme', theme);
@@ -368,7 +373,7 @@ export function App() {
     <div className="workspace" inert={busy}>
       <aside className="sidebar" aria-label="笔记目录"><button className="vault-button" disabled={busy || !bridge} onClick={() => void chooseVault()} title={vault?.root || '打开笔记文件夹'}><span className="brand-mark"><Icon name="book" /></span><span><strong>{vault?.name || '打开笔记库'}</strong><small>{vault ? '本地笔记' : '选择一个文件夹'}</small></span><Icon name="chevrons" /></button><label className="search-field"><Icon name="search" /><input aria-label="查找笔记名称" placeholder="查找笔记名称" value={query} onChange={event => setQuery(event.target.value)} /></label><button className="new-note" disabled={!vault || busy} onClick={() => openCreate()}><Icon name="plus" />新建笔记<kbd>{command} N</kbd></button><div className="section-label">文件 <span className="directory-tools"><button className="icon-button" aria-label="新建目录" title="新建目录" disabled={!vault || busy || creating} onClick={openDirectory}><Icon name="folder-plus" /></button><button className="icon-button" title="刷新目录" aria-label="刷新目录" disabled={!vault} onClick={() => void refreshFiles()}><Icon name="refresh" /></button></span></div><div className="files-pane">{busy ? <p className="empty-label">正在处理文件…</p> : query ? <>{filtered.map(file => <FileRow key={file.path} file={file} active={active} open={p => void openNote(p)} remove={p => void requestDelete(p)} rename={p => requestRename('file', p)} />)}{!filtered.length && <p className="empty-label">没有匹配的笔记，试试其他名称。</p>}</> : <FileTree files={files} directories={directories} selectedDirectory={selectedDirectory} active={active} open={p => void openNote(p)} remove={p => void requestDelete(p)} rename={requestRename} chooseDirectory={setSelectedDirectory} />}{vault && !files.length && !directories.length && !busy && <p className="empty-label">这里还没有 Markdown 笔记。<br />新建一篇，开始记录。</p>}</div>{recoveries.length > 0 && <button className="recovery-button" onClick={() => setModal({ type: 'recoveries' })}>恢复未保存内容 ({recoveries.length})</button>}<footer className="sidebar-footer"><button className="icon-button" aria-label="设置" title="设置" onClick={() => setModal({ type: 'settings' })}><Icon name="settings" /></button><button className="theme-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}><Icon name={theme === 'dark' ? 'sun' : 'moon'} />{theme === 'dark' ? '浅色模式' : '深色模式'}</button></footer></aside>
       <main className="editor-area"><div className="tabs" role="tablist" aria-label="已打开笔记">{[...sessions.current.values()].map(session => <div key={session.path} className={'tab' + (active === session.path ? ' active' : '')}><button className="tab-select" role="tab" aria-selected={active === session.path} title={session.path} onClick={() => select(session.path)}><Icon name={session.status === 'error' || session.status === 'conflict' ? 'warning' : 'file'} /><span>{nameOf(session.path)}</span>{session.content !== session.savedContent && <span className="dirty-dot" aria-label="未保存" />}</button><button className="tab-close" aria-label={'关闭 ' + nameOf(session.path)} onClick={() => void closeTab(session.path)}><Icon name="close" /></button></div>)}{vault && <button className="tab-add" aria-label="新建笔记" onClick={() => openCreate()}><Icon name="plus" /></button>}</div>
-        {activeSession ? <><div className="editor-toolbar"><div className="breadcrumb" title={active}>{active.split('/').map((part, i) => <span key={i}>{i > 0 && <Icon name="chevron" />}{part.replace(/\.md$/i, '')}</span>)}</div><div className="editor-actions"><div className="editor-modes" role="group" aria-label="正文显示模式"><button className="mode-button" aria-pressed={mode === 'live'} onClick={() => setMode('live')}>即时预览</button><button className="mode-button" aria-pressed={mode === 'source'} onClick={() => setMode('source')}><Icon name="code" />源码</button><button className="mode-button" aria-pressed={mode === 'read'} onClick={() => setMode('read')}><Icon name="book" />阅读模式</button></div><button className="icon-button" aria-label="删除当前笔记" title="删除当前笔记" onClick={() => void requestDelete(active)}><Icon name="trash" /></button><button className="icon-button" aria-label="导出 DOCX" title="导出 DOCX" onClick={() => void exportNote()}><Icon name="export" /></button></div></div>{(activeSession.error || message) && <div className={'notice' + (activeSession.error ? ' error' : '')} role="status"><Icon name="warning" /><p>{activeSession.error?.message || message}</p>{activeSession.status === 'conflict' ? <button onClick={() => void compare()}>比较版本</button> : activeSession.error ? <button onClick={() => void activeSession.flush()}>重试保存</button> : <button aria-label="关闭提示" onClick={() => setMessage('')}><Icon name="close" /></button>}{activeSession.error && <button onClick={() => openCreate(activeSession.content, activeSession.path)}>另存为副本</button>}</div>}<Editor path={active} content={activeSession.content} mode={mode} readOnly={busy} onChange={edit} onReady={view => { editor.current = view; }} /></> : <section className="welcome"><span className="welcome-mark"><Icon name="book" /></span><h1>{vault ? '从一篇笔记开始。' : '让笔记回到你手中。'}</h1><p>{vault ? '新建笔记，或从左侧目录打开已有内容。' : '打开本地文件夹，继续使用你的 Markdown 笔记。'}</p><button className="primary-button" disabled={busy || !bridge} onClick={() => vault ? openCreate() : void chooseVault()}>{busy ? '正在加载…' : vault ? '新建笔记' : '打开笔记文件夹'}</button><small>{bridge ? '笔记直接保存在本地，无需导入转换。' : '请通过 npm run dev 启动桌面应用以访问本地文件。'}</small>{message && <p className="welcome-error" role="status">{message}</p>}</section>}</main>
+        {activeSession ? <><div className="editor-toolbar"><div className="breadcrumb" title={active}>{active.split('/').map((part, i) => <span key={i}>{i > 0 && <Icon name="chevron" />}{part.replace(/\.md$/i, '')}</span>)}</div><div className="editor-actions"><div className="editor-modes" role="group" aria-label="正文显示模式"><button className="mode-button" aria-pressed={mode === 'live'} onClick={() => setMode('live')}>即时预览</button><button className="mode-button" aria-pressed={mode === 'source'} onClick={() => setMode('source')}><Icon name="code" />源码</button><button className="mode-button" aria-pressed={mode === 'read'} onClick={() => setMode('read')}><Icon name="book" />阅读模式</button></div><button className="icon-button" aria-label="删除当前笔记" title="删除当前笔记" onClick={() => void requestDelete(active)}><Icon name="trash" /></button><button className="icon-button" aria-label="导出 DOCX" title="导出 DOCX" onClick={() => void exportNote()}><Icon name="export" /></button></div></div>{(activeSession.error || message) && <div className={'notice' + (activeSession.error ? ' error' : '')} role="status"><Icon name={activeSession.error || messageKind === 'error' ? 'warning' : 'check'} /><p>{activeSession.error?.message || message}</p>{activeSession.status === 'conflict' ? <button onClick={() => void compare()}>比较版本</button> : activeSession.error ? <button onClick={() => void activeSession.flush()}>重试保存</button> : <button aria-label="关闭提示" onClick={() => setMessage('')}><Icon name="close" /></button>}{activeSession.error && <button onClick={() => openCreate(activeSession.content, activeSession.path)}>另存为副本</button>}</div>}<Editor path={active} content={activeSession.content} mode={mode} readOnly={busy} onChange={edit} onReady={view => { editor.current = view; }} /></> : <section className="welcome"><span className="welcome-mark"><Icon name="book" /></span><h1>{vault ? '从一篇笔记开始。' : '让笔记回到你手中。'}</h1><p>{vault ? '新建笔记，或从左侧目录打开已有内容。' : '打开本地文件夹，继续使用你的 Markdown 笔记。'}</p><button className="primary-button" disabled={busy || !bridge} onClick={() => vault ? openCreate() : void chooseVault()}>{busy ? '正在加载…' : vault ? '新建笔记' : '打开笔记文件夹'}</button><small>{bridge ? '笔记直接保存在本地，无需导入转换。' : '请通过 npm run dev 启动桌面应用以访问本地文件。'}</small>{message && <p className="welcome-error" role="status">{message}</p>}</section>}</main>
       <aside className="inspector" aria-label="笔记侧栏"><div className="resize-handle" onMouseDown={startResize} aria-hidden="true" /><div className="inspector-tabs"><button className={'inspector-tab' + (inspectorTab === 'outline' ? ' active' : '')} aria-pressed={inspectorTab === 'outline'} onClick={() => setInspectorTab('outline')}>大纲</button><button className={'inspector-tab' + (inspectorTab === 'ai' ? ' active' : '')} aria-pressed={inspectorTab === 'ai'} onClick={() => setInspectorTab('ai')}>AI 对话</button></div>{inspectorTab === 'outline' ? <><nav className="outline" aria-label="当前笔记大纲">{headings.map((heading, index) => <button key={index} style={{ paddingLeft: 11 + Math.min(heading.level - 1, 3) * 10 }} onClick={() => { const view = editor.current; if (view && heading.line <= view.state.doc.lines) { const line = view.state.doc.line(heading.line); view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'start' }) }); view.focus(); } }}>{heading.text}</button>)}{!headings.length && <p className="empty-label">添加标题后，可以在这里浏览笔记结构。</p>}</nav><p className="inspector-tip">正文直接使用 Markdown。<br />需要精确编辑时，可切换源码模式。</p></> : bridge ? <AiPanel bridge={bridge} note={activeSession ? { path: activeSession.path, name: nameOf(activeSession.path), content: activeSession.content } : null} getSelection={getSelection} onInsert={insertText} onConfigMissing={() => setModal({ type: 'settings', prompt: '请先配置 AI API Key，再使用 AI 对话。' })} /> : <p className="empty-label">AI 对话需要在桌面应用中运行。</p>}</aside>
     </div>
     <footer className="statusbar"><span className={'save-status' + (activeSession?.error ? ' failed' : '')}><Icon name={activeSession?.error ? 'warning' : 'check'} />{activeSession ? statuses[activeSession.status] : '本地笔记'}{dirty.length > 1 && ` · ${dirty.length} 篇待保存`}</span><span className="vault-path" title={vault?.root}>{vault?.root}</span><div><span>{activeSession ? `${activeSession.content.replace(/\s/g, '').length} 字` : `${files.length} 篇笔记`}</span>{activeSession && <span>{mode === 'source' ? '源码模式' : mode === 'read' ? '阅读模式 · 正文只读' : '即时预览'}</span>}</div></footer>
