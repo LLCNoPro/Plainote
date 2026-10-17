@@ -10,7 +10,7 @@ web
 
 ## Stack
 
-用户已授权采用 Electron、React、TypeScript 与 CodeMirror 6 继续第一阶段开发：桌面框架、打开本地笔记库、Markdown 编辑与可靠保存。独立原型继续保留，正式应用沿用已认可界面。
+已采用 Electron、React、TypeScript 与 CodeMirror 6。桌面框架、本地笔记库、Markdown 编辑与可靠保存已实现，并扩展了阅读模式、文件管理、主题、AI 对话与 DOCX 导出。独立原型继续保留，正式应用沿用已认可界面。
 
 ## Users
 
@@ -26,12 +26,12 @@ web
 
 ## Capabilities and Constraints
 
-- 第一版支持 macOS 与 Windows。
+- 第一版目标支持 macOS 与 Windows；macOS 已执行桌面回归，Windows 已有构建配置，交互仍待验证。
 - 使用本地 Markdown 文件与附件，保留现有笔记结构和内容。
 - 核心功能规划包含目录树、多标签、搜索、模板、图片、双向链接、大纲和反向链接。
 - 自动保存、文件变更检测、冲突提示与恢复是可靠性要求。
 - 第一版不开发内置同步、账户服务或插件兼容。
-- 完整实现范围与技术栈仍待评审；界面应明确区分产品目标和示例内容。
+- 技术栈已确定；全文搜索、模板、图片附件、双链与反向链接等仍未完成。2026-10-17 实测构建、51 项单测及 41 项 macOS 桌面检查通过，详细边界见 docs/plans/2026-10-17-progress-audit.md。
 
 ## Brand Commitments
 
@@ -39,8 +39,8 @@ web
 
 ## Evidence on Hand
 
-- 产品与技术规划草案：docs/plans/2026-10-12-plainote-design.md。
-- 无现有界面、品牌资产或用户笔记样本。
+- 产品与技术规划：docs/plans/2026-10-12-plainote-design.md；当前进度：docs/plans/2026-10-17-progress-audit.md。
+- 已有正式桌面界面、独立原型和临时笔记库桌面验证截图；本次验证未使用用户真实笔记样本。
 - 后续界面中的会议、项目和笔记文本只能作为明确标注的示例，不代表用户真实资料。
 
 ## Product Principles
