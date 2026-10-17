@@ -19,7 +19,7 @@ async function eventually(fn){let last;for(let i=0;i<80;i++){try{return await fn
  await eventually(async()=>assert.equal(await fs.readFile(file,'utf8'),source.replace('- [ ]','- [x]')));
  await page.locator('.cm-task-checkbox').uncheck();await eventually(async()=>assert.equal(await fs.readFile(file,'utf8'),source));
  await page.locator('.cm-content').click();await page.keyboard.press(process.platform==='darwin'?'Meta+a':'Control+a');
- await eventually(async()=>assert.ok(await page.locator('.cm-selectionBackground').count()>0));
+ await eventually(async()=>assert.ok(await page.evaluate(()=>{const s=window.getSelection();return s&&!s.isCollapsed&&s.toString().length>0;})));
  await page.locator('.lp-table-preview').click();assert.equal(await page.locator('.lp-table-preview').count(),1);
  assert.equal(await fs.readFile(file,'utf8'),source);
  await page.locator('.outline').getByRole('button',{name:'表格',exact:true}).click();assert.equal(await page.locator('.lp-table-preview').count(),1);

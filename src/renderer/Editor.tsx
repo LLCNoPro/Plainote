@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { EditorState, Compartment } from '@codemirror/state';
-import { EditorView, keymap, drawSelection, highlightActiveLine, placeholder } from '@codemirror/view';
+import { EditorView, keymap, highlightActiveLine, placeholder } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -44,7 +44,7 @@ export function Editor(props: Props) {
     callbacks.current.onImportFiles(files, position);
   };
   const createState = (content: string) => EditorState.create({ doc: normalizeDocument(content), extensions: [
-    history(), drawSelection(), highlightActiveLine(), highlightSelectionMatches(),
+    history(), highlightActiveLine(), highlightSelectionMatches(),
     keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     markdown({ base: markdownLanguage, codeLanguages: languages }), syntaxHighlighting(highlighting), EditorView.lineWrapping,
     EditorView.contentAttributes.of({ 'aria-label': 'Markdown 笔记正文', spellcheck: 'false', tabindex: '0' }),
