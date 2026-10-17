@@ -61,7 +61,8 @@ export async function resolveImages(vault: VaultService, notePath: string, conte
     if (res.status === 'external') {
       result.push({ kind, target: ref.target, status: 'external', url: /^(https?:|data:)/.test(ref.target) ? ref.target : undefined });
     } else if (res.status === 'ok') {
-      if (kind === 'embed' && !/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(res.path)) result.push({ kind, target: ref.target, status: 'not-image' });
+      const previewable = /\.(png|jpe?g|gif|webp|svg|bmp|ico|pdf|mp4|webm|ogv|mov|m4v|mp3|wav|ogg|m4a|flac)$/i.test(res.path);
+      if (kind === 'embed' && !previewable) result.push({ kind, target: ref.target, status: 'not-image' });
       else result.push({ kind, target: ref.target, status: 'ok', url: 'plainote-file://v/' + encodeURIComponent(res.path) });
     } else {
       result.push({ kind, target: ref.target, status: res.status });

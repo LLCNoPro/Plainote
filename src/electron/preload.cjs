@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('plainote', {
   scan: () => invoke('scan'), read: path => invoke('read', path),
   scanEntries: () => invoke('scan-entries'),
   openPath: path => invoke('open-path', path),
+  readText: path => invoke('read-text', path),
   save: (path, content, revision) => invoke('save', path, content, revision),
   create: (path, content) => invoke('create', path, content),
   stageRecovery: (path, content, revision) => invoke('stage-recovery', path, content, revision),

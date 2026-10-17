@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findReferences, splitWikilink, relativeLink, encodeMarkdownUrl, resolveReference, rewriteNote, type VaultIndex } from '../src/shared/references.ts';
+import { findReferences, splitWikilink, relativeLink, encodeMarkdownUrl, looksLikeExternalUrl, resolveReference, rewriteNote, type VaultIndex } from '../src/shared/references.ts';
 
 function index(files: string[]): VaultIndex {
   const set = new Set(files);
@@ -115,4 +115,15 @@ test('markdown 目标中空格经百分号编码后正确解析，保留中文�
   assert.equal(encodeMarkdownUrl('项目/图 片.png'), '项目/图%20片.png');
   const idx = index(['项目/图 片.png']);
   assert.deepEqual(resolveReference({ kind: 'image', target: '图%20片.png', start: 0, end: 0, pathStart: 0, pathEnd: 0 }, '项目/周会.md', idx), { status: 'ok', path: '项目/图 片.png' });
+});
+
+test('裸域名识别为外部链接，本地文件名不误判', () => {
+  assert.equal(looksLikeExternalUrl('www.baidu.com'), true);
+  assert.equal(looksLikeExternalUrl('baidu.com'), true);
+  assert.equal(looksLikeExternalUrl('example.com/path'), true);
+  assert.equal(looksLikeExternalUrl('report.pdf'), false);
+  assert.equal(looksLikeExternalUrl('notes/report.md'), false);
+  assert.equal(looksLikeExternalUrl('/绝对路径.md'), false);
+  // 引用解析把裸域名归为 external 而非 missing
+  assert.deepEqual(resolveReference({ kind: 'link', target: 'www.baidu.com', start: 0, end: 0, pathStart: 0, pathEnd: 0 }, '某.md', index([])), { status: 'external' });
 });

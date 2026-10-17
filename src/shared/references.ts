@@ -39,7 +39,15 @@ export function splitWikilink(inner: string): { target: string; display?: string
   return { target: rest, display, anchor, block };
 }
 
-const isExternal = (target: string) => /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target) || target.startsWith('//') || target.startsWith('#') || target.startsWith('/');
+const isExternal = (target: string) => /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target) || target.startsWith('//') || target.startsWith('#') || target.startsWith('/') || looksLikeExternalUrl(target);
+
+const EXTERNAL_TLD = /\.(com|cn|net|org|io|co|me|info|biz|app|dev|xyz|top|site|online|store|shop|tech|ai|gov|edu|cc|tv|live|news|club|vip|wang|fun|cloud|wiki|blog|icu|link|work|life|world|plus)$/i;
+// 判断是否形如裸域名（www. 开头，或带常见顶级域），用于把 www.baidu.com 之类的目标识别为外部链接。
+export function looksLikeExternalUrl(target: string): boolean {
+  if (target.startsWith('/')) return false;
+  const bare = target.split(/[?#/]/)[0];
+  return /^www\./i.test(bare) || EXTERNAL_TLD.test(bare);
+}
 
 function dirOf(p: string): string { const i = p.lastIndexOf('/'); return i === -1 ? '' : p.slice(0, i); }
 

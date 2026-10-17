@@ -33,6 +33,7 @@ export interface PlainoteBridge {
   read(path: string): Promise<Result<NoteSnapshot>>;
   scanEntries(): Promise<Result<NoteFile[]>>;
   openPath(path: string): Promise<Result<void>>;
+  readText(path: string): Promise<Result<string>>;
   save(path: string, content: string, revision: string): Promise<Result<NoteSnapshot>>;
   create(path: string, content: string): Promise<Result<NoteSnapshot>>;
   stageRecovery(path: string, content: string, revision: string): Promise<Result<void>>;

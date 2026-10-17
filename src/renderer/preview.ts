@@ -2,20 +2,65 @@ import type { EditorState } from '@codemirror/state';
 import { EditorState as State, StateEffect, StateField, Facet } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { normalizeDocument } from '../shared/raw-document.ts';
-import { findReferences } from '../shared/references.ts';
+import { findReferences, relativeLink, encodeMarkdownUrl, looksLikeExternalUrl } from '../shared/references.ts';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import type { Range } from '@codemirror/state';
+import { CompletionContext } from '@codemirror/autocomplete';
+import type { Completion, CompletionResult } from '@codemirror/autocomplete';
 import type { PlainoteBridge, ResolvedImage } from '../shared/types.ts';
 
 declare global { interface Window { plainote?: PlainoteBridge } }
 
 export const taskTogglePermission = Facet.define<boolean, boolean>({ combine: values => values.length ? values.at(-1)! : false });
-export interface NoteAssets { notePath: string; images: Map<string, ResolvedImage>; openNote?: (path: string) => void }
+export interface NoteAssets { notePath: string; images: Map<string, ResolvedImage>; openNote?: (path: string) => void; previewAttachment?: (path: string) => void }
 export const noteAssetsFacet = Facet.define<NoteAssets | null, NoteAssets | null>({ combine: values => values.length ? values.at(-1)! : null });
 export function noteAssetsExt(assets: NoteAssets | null) { return noteAssetsFacet.of(assets); }
+
+export const filePathsFacet = Facet.define<string[], string[]>({ combine: values => values.length ? values.at(-1)! : [] });
+export function filePathsExt(paths: string[]) { return filePathsFacet.of(paths); }
+
+const isNotePath = (p: string) => /\.md$/i.test(p);
+
+// 在链接/图片/双链目标位置输入时，从笔记库文件列表补全路径。
+export function fileCompletionSource(context: CompletionContext): CompletionResult | null {
+  const paths = context.state.facet(filePathsFacet);
+  if (!paths.length) return null;
+  const pos = context.pos;
+  const line = context.state.doc.lineAt(pos);
+  const before = line.text.slice(0, pos - line.from);
+
+  const wiki = before.match(/\[\[([^\[\]\n]*)$/);
+  if (wiki) {
+    const partial = wiki[1];
+    const q = partial.toLowerCase();
+    const options: Completion[] = paths.filter(p => p.toLowerCase().includes(q)).map(p => ({
+      label: isNotePath(p) ? p.replace(/\.md$/i, '') : p,
+      detail: p,
+      type: isNotePath(p) ? 'class' : 'file',
+      apply: isNotePath(p) ? p.replace(/\.md$/i, '') : p,
+    })).slice(0, 60);
+    return { from: pos - partial.length, options, validFor: /^[^\[\]\n]*$/ };
+  }
+
+  const link = before.match(/(?:!\[[^\]]*\]|\[[^\]]*\])\(([^)\n]*)$/);
+  if (link) {
+    const partial = link[1];
+    const q = partial.toLowerCase();
+    const notePath = context.state.facet(noteAssetsFacet)?.notePath ?? '';
+    const noteDir = notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/')) : '';
+    const options: Completion[] = paths.filter(p => { const base = p.split('/').at(-1)!; return base.toLowerCase().includes(q) || p.toLowerCase().includes(q); }).map(p => ({
+      label: p.split('/').at(-1)!,
+      detail: p,
+      type: isNotePath(p) ? 'class' : 'file',
+      apply: encodeMarkdownUrl(relativeLink(noteDir, p)),
+    })).slice(0, 60);
+    return { from: pos - partial.length, options, validFor: /^[^)\n]*$/ };
+  }
+  return null;
+}
 
 export interface PreviewRange { kind: 'line' | 'hide' | 'mark' | 'task' | 'code-label' | 'rule' | 'bullet' | 'table' | 'image'; from: number; to: number; className?: string; text?: string; target?: string; attributes?: Record<string, string> }
 export function extractHeadings(raw: string): { text: string; level: number; line: number }[] {
@@ -287,6 +332,14 @@ function openLightbox(src: string, alt: string) {
 }
 function closeLightbox() { if (lightbox) { lightbox.remove(); lightbox = null; window.removeEventListener('keydown', onLightboxKey); } }
 
+const fileKind = (name: string): 'image' | 'pdf' | 'video' | 'audio' | 'other' => {
+  if (/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(name)) return 'image';
+  if (/\.pdf$/i.test(name)) return 'pdf';
+  if (/\.(mp4|webm|ogv|mov|m4v)$/i.test(name)) return 'video';
+  if (/\.(mp3|wav|ogg|m4a|flac)$/i.test(name)) return 'audio';
+  return 'other';
+};
+
 class ImageWidget extends WidgetType {
   constructor(readonly kind: 'image' | 'embed', readonly target: string, readonly alt: string, readonly assets: NoteAssets | null) { super(); }
   eq(other: ImageWidget) { return other.kind === this.kind && other.target === this.target && other.alt === this.alt && other.assets === this.assets; }
@@ -296,15 +349,42 @@ class ImageWidget extends WidgetType {
     const resolved = this.assets?.images.get(this.kind + ':' + this.target);
     const url = resolved?.status === 'ok' || resolved?.status === 'external' ? resolved.url : undefined;
     if (url) {
-      const img = document.createElement('img');
-      img.src = url; img.alt = this.alt; img.loading = 'lazy';
-      img.addEventListener('error', () => { wrap.classList.add('lp-image-missing'); wrap.replaceChildren(this.placeholder('图片不存在或无法读取')); });
-      img.addEventListener('click', () => openLightbox(url, this.alt));
-      wrap.append(img);
+      const type = fileKind(this.target);
+      if (type === 'image') {
+        const img = document.createElement('img');
+        img.src = url; img.alt = this.alt; img.loading = 'lazy';
+        img.addEventListener('error', () => { wrap.classList.add('lp-image-missing'); wrap.replaceChildren(this.placeholder('图片不存在或无法读取')); });
+        img.addEventListener('click', () => openLightbox(url, this.alt));
+        wrap.append(img);
+        return wrap;
+      }
+      if (type === 'pdf') {
+        const frame = document.createElement('iframe');
+        frame.src = url; frame.className = 'lp-embed-frame'; frame.title = this.alt || this.target;
+        wrap.classList.add('lp-embed');
+        wrap.append(frame);
+        return wrap;
+      }
+      if (type === 'video') {
+        const video = document.createElement('video');
+        video.src = url; video.controls = true; video.className = 'lp-embed-media';
+        wrap.classList.add('lp-embed');
+        wrap.append(video);
+        return wrap;
+      }
+      if (type === 'audio') {
+        const audio = document.createElement('audio');
+        audio.src = url; audio.controls = true; audio.className = 'lp-embed-audio';
+        wrap.classList.add('lp-embed');
+        wrap.append(audio);
+        return wrap;
+      }
+      wrap.classList.add('lp-image-missing');
+      wrap.append(this.placeholder('此类型不支持内联预览'));
       return wrap;
     }
     wrap.classList.add('lp-image-missing');
-    wrap.append(this.placeholder(resolved ? (resolved.status === 'ambiguous' ? '无法确定图片路径' : resolved.status === 'external' ? '不支持的外部图片' : '图片不存在或无法读取') : '加载图片…'));
+    wrap.append(this.placeholder(resolved ? (resolved.status === 'ambiguous' ? '无法确定文件路径' : resolved.status === 'external' ? '不支持的外部文件' : '文件不存在或无法读取') : '加载…'));
     return wrap;
   }
   placeholder(text: string): HTMLElement {
@@ -326,13 +406,14 @@ export const livePreview = [blockPreview, inlinePreview, EditorView.domEventHand
     const url = link.dataset.url;
     if (!url) return false;
     if (/^(https?:|mailto:)/.test(url)) { void window.plainote?.openExternal(url); return true; }
+    if (looksLikeExternalUrl(url)) { void window.plainote?.openExternal('https://' + url); return true; }
     const assets = view.state.facet(noteAssetsFacet);
     const notePath = assets?.notePath ?? '';
     void window.plainote?.resolveTarget(url, notePath).then(result => {
       if (!result.ok) return;
       const { status, path } = result.value;
       if (status === 'note' && path) assets?.openNote?.(path);
-      else if (status === 'attachment' && path) void window.plainote?.openPath(path);
+      else if (status === 'attachment' && path) assets?.previewAttachment?.(path);
     });
     return true;
   },

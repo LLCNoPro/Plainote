@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'elec
 import type { IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -45,7 +45,7 @@ const userFile = () => path.join(app.getPath('userData'), 'preferences.json');
 const recoveryDir = () => path.join(app.getPath('userData'), 'recovery');
 const attachmentStore = () => path.join(app.getPath('userData'), 'attachment-config.json');
 function mimeFor(filename: string): string {
-  const map: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown' };
+  const map: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json', '.csv': 'text/csv', '.mp4': 'video/mp4', '.webm': 'video/webm', '.ogv': 'video/ogg', '.mov': 'video/quicktime', '.m4v': 'video/x-m4v', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.flac': 'audio/flac' };
   return map[path.extname(filename).toLowerCase()] || 'application/octet-stream';
 }
 async function vaultInfo(): Promise<VaultInfo | null> { return vault ? { root: vault.root, name: path.basename(vault.root), files: await vault.scanEntries(), directories: await vault.directories() } : null; }
@@ -94,6 +94,13 @@ register('open-path', async (relative: unknown) => {
   const absolute = await requireVault().resolveResource(relative);
   const result = await shell.openPath(absolute);
   if (result) throw new VaultError('IO', '无法打开附件：' + result);
+});
+register('read-text', async (relative: unknown) => {
+  if (typeof relative !== 'string') throw new VaultError('INVALID_PATH', '读取路径无效。');
+  const absolute = await requireVault().resolveResource(relative);
+  const info = await stat(absolute);
+  if (info.size > 2 * 1024 * 1024) throw new VaultError('TOO_LARGE', '附件超过 2 MB，无法在应用内预览文本。');
+  return (await readFile(absolute)).toString('utf8');
 });
 register('read', (relative: string) => requireVault().read(relative));
 register('save', (relative: string, content: string, revision: string) => { contentArgs(relative, content, revision); return requireVault().save(relative, content, revision); });

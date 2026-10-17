@@ -80,3 +80,13 @@ test('resolveTarget 区分笔记/附件/外部/缺失', async t => {
   assert.deepEqual(await resolveTarget(vault, '某.md', 'https://x.com'), { status: 'external' });
   assert.deepEqual(await resolveTarget(vault, '某.md', '缺失.md'), { status: 'missing' });
 });
+
+test('PDF 在图片语法与嵌入语法下均可解析为内联预览', async t => {
+  const { vault, root } = await fixture(t);
+  await writeFile(path.join(root, '1.pdf'), 'pdf');
+  await vault.create('笔记.md', '![a](1.pdf)\n\n![[1.pdf]]');
+  const result = await resolveImages(vault, '笔记.md', (await vault.read('笔记.md')).content);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].status, 'ok');
+  assert.equal(result[1].status, 'ok');
+});

@@ -39,12 +39,15 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwA
   await page.keyboard.press('Escape');
   await eventually(async () => assert.equal(await page.locator('.lp-lightbox').count(), 0));
 
-  // 点击本地附件链接通过系统应用打开
+  // 点击本地附件链接在应用内预览（新标签页），预览中可再转系统应用打开
   await app.evaluate(({ shell }) => { globalThis.openedPath = null; shell.openPath = async p => { globalThis.openedPath = p; return ''; }; });
   await page.locator('.lp-link').click();
-  await eventually(async () => assert.ok((await app.evaluate(() => globalThis.openedPath)), '点击本地附件链接应调用系统打开'));
+  await page.locator('.preview-toolbar').waitFor();
+  await page.getByRole('button', { name: '用系统应用打开' }).click();
+  await eventually(async () => assert.ok((await app.evaluate(() => globalThis.openedPath)), '预览中调用系统打开应触发 openPath'));
   const opened = await app.evaluate(() => globalThis.openedPath);
   assert.equal(path.basename(opened), '附 件.txt');
+  await page.getByRole('button', { name: '关闭预览' }).click();
 
   // 拖入图片导入：写入附件目录并在笔记插入引用
   await page.locator('.cm-content').click();
@@ -74,7 +77,7 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwA
 
   await page.screenshot({ path: path.join(output, 'images.png') });
   assert.deepEqual(errors, []);
-  const report = { status: 'passed', checks: ['两种图片语法预览', '受控协议加载', '缺失图片占位', '点击放大与 Esc 关闭', '点击本地附件系统打开', '拖入导入写入附件并插入引用', '附件位置配置持久化'], pageErrors: errors };
+  const report = { status: 'passed', checks: ['两种图片语法预览', '受控协议加载', '缺失图片占位', '点击放大与 Esc 关闭', '点击附件应用内预览并转系统打开', '拖入导入写入附件并插入引用', '附件位置配置持久化'], pageErrors: errors };
   await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
   await app.close(); app = null;
