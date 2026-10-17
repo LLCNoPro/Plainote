@@ -191,3 +191,94 @@ test('重命名笔记后恢复内容跟随新路径', async t => {
   assert.equal((await vault.getRecovery('新.md'))?.content, 'unsaved');
   assert.equal(await vault.getRecovery('旧.md'), null);
 });
+
+test('重命名到其他目录即移动文件，保持内容', async t => {
+  const { vault, root } = await fixture(t);
+  await vault.createDirectory('目标');
+  await vault.create('笔记.md', '# 内容');
+  await vault.rename('笔记.md', '目标/笔记.md');
+  assert.equal(await readFile(path.join(root, '目标', '笔记.md'), 'utf8'), '# 内容');
+  assert.deepEqual((await vault.scan()).map(f => f.path), ['目标/笔记.md']);
+});
+
+test('目录不能移动到自身或子目录，重名目标被拒绝', async t => {
+  const { vault } = await fixture(t);
+  await vault.createDirectory('a/b');
+  await vault.create('a/笔记.md', '# 内容');
+  await assert.rejects(vault.rename('a', 'a'), { code: 'INVALID_PATH' });
+  await assert.rejects(vault.rename('a', 'a/b'), { code: 'INVALID_PATH' });
+  await vault.createDirectory('目标');
+  await vault.create('目标/笔记.md', '# 其它');
+  await assert.rejects(vault.rename('a/笔记.md', '目标/笔记.md'), { code: 'EXISTS' });
+  await assert.rejects(vault.rename('a/笔记.md', '../越界/笔记.md'), { code: 'INVALID_PATH' });
+});
+
+test('统计目录内笔记与附件数量', async t => {
+  const { vault, root } = await fixture(t);
+  await vault.createDirectory('项目');
+  await vault.create('项目/a.md', '# a');
+  await vault.create('项目/b.md', '# b');
+  await writeFile(path.join(root, '项目', '图.png'), 'img');
+  assert.deepEqual(await vault.countDirectory('项目'), { notes: 2, attachments: 1, files: 3 });
+  assert.deepEqual(await vault.countDirectory('不存在'), { notes: 0, attachments: 0, files: 0 });
+});
+
+test('删除目录移入回收站并清理其中笔记的恢复记录', async t => {
+  const { vault, base } = await fixture(t);
+  await vault.createDirectory('项目');
+  await vault.create('项目/笔记.md', '内容');
+  const note = await vault.read('项目/笔记.md');
+  await vault.stageRecovery('项目/笔记.md', '未保存', note.revision);
+  const { rename } = await import('node:fs/promises');
+  await vault.trashDirectory('项目', file => rename(file, path.join(base, 'trashed-dir')));
+  assert.deepEqual(await vault.directories(), []);
+  assert.deepEqual(await vault.scan(), []);
+  assert.equal(await vault.getRecovery('项目/笔记.md'), null);
+});
+
+test('回收站失败时保留目录', async t => {
+  const { vault } = await fixture(t);
+  await vault.createDirectory('项目');
+  await vault.create('项目/笔记.md', '内容');
+  await assert.rejects(vault.trashDirectory('项目', async () => { throw new Error('trash failed'); }), /trash failed/);
+  assert.deepEqual((await vault.scan()).map(f => f.path), ['项目/笔记.md']);
+});
+
+test('写入附件自动建目录并重名避让，不覆盖已有文件', async t => {
+  const { vault, root } = await fixture(t);
+  const first = await vault.writeAttachment('attachments', '图.png', Buffer.from('一'));
+  const second = await vault.writeAttachment('attachments', '图.png', Buffer.from('二'));
+  assert.equal(first, '图.png');
+  assert.equal(second, '图 1.png');
+  assert.equal(await readFile(path.join(root, 'attachments', '图.png'), 'utf8'), '一');
+  assert.equal(await readFile(path.join(root, 'attachments', '图 1.png'), 'utf8'), '二');
+  const third = await vault.writeAttachment('', '截图 2024.png', Buffer.from('三'));
+  assert.equal(third, '截图 2024.png');
+});
+
+test('附件文件名去除路径分隔与非法字符', async t => {
+  const { vault, root } = await fixture(t);
+  const name = await vault.writeAttachment('attachments', '../越界/图?.png', Buffer.from('x'));
+  assert.equal(name, '越界图.png');
+  assert.equal(await readFile(path.join(root, 'attachments', '越界图.png'), 'utf8'), 'x');
+});
+
+test('解析库内资源，拒绝越界与符号链接', async t => {
+  const { vault, root, base } = await fixture(t);
+  await writeFile(path.join(root, '图.png'), 'img');
+  assert.equal(await vault.resolveResource('图.png'), path.join(vault.root, '图.png'));
+  await writeFile(path.join(base, 'outside.png'), 'img');
+  await symlink(path.join(base, 'outside.png'), path.join(root, 'linked.png'));
+  await assert.rejects(vault.resolveResource('linked.png'), { code: 'INVALID_PATH' });
+  await assert.rejects(vault.resolveResource('../outside.png'), { code: 'INVALID_PATH' });
+  await assert.rejects(vault.resolveResource('缺失.png'), { code: 'NOT_FOUND' });
+});
+test('scanEntries 包含附件并区分笔记与附件名称', async t => {
+  const { vault, root } = await fixture(t);
+  await vault.create('笔记.md', '# 内容');
+  await writeFile(path.join(root, '图.png'), 'img');
+  const entries = await vault.scanEntries();
+  assert.deepEqual(entries.map(e => e.path).sort(), ['图.png', '笔记.md']);
+  assert.equal(entries.find(e => e.path === '笔记.md')!.name, '笔记');
+  assert.equal(entries.find(e => e.path === '图.png')!.name, '图.png');
+});

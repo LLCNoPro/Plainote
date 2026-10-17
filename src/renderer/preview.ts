@@ -2,13 +2,22 @@ import type { EditorState } from '@codemirror/state';
 import { EditorState as State, StateEffect, StateField, Facet } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { normalizeDocument } from '../shared/raw-document.ts';
+import { findReferences } from '../shared/references.ts';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import type { Range } from '@codemirror/state';
+import type { PlainoteBridge, ResolvedImage } from '../shared/types.ts';
+
+declare global { interface Window { plainote?: PlainoteBridge } }
+
 export const taskTogglePermission = Facet.define<boolean, boolean>({ combine: values => values.length ? values.at(-1)! : false });
-export interface PreviewRange { kind: 'line' | 'hide' | 'mark' | 'task' | 'code-label' | 'rule' | 'bullet' | 'table'; from: number; to: number; className?: string; text?: string }
+export interface NoteAssets { notePath: string; images: Map<string, ResolvedImage>; openNote?: (path: string) => void }
+export const noteAssetsFacet = Facet.define<NoteAssets | null, NoteAssets | null>({ combine: values => values.length ? values.at(-1)! : null });
+export function noteAssetsExt(assets: NoteAssets | null) { return noteAssetsFacet.of(assets); }
+
+export interface PreviewRange { kind: 'line' | 'hide' | 'mark' | 'task' | 'code-label' | 'rule' | 'bullet' | 'table' | 'image'; from: number; to: number; className?: string; text?: string; target?: string; attributes?: Record<string, string> }
 export function extractHeadings(raw: string): { text: string; level: number; line: number }[] {
   const state = State.create({ doc: normalizeDocument(raw), extensions: [markdown({ base: markdownLanguage })] });
   return previewRanges(state, new Set()).filter(r => r.kind === 'line' && r.className?.startsWith('lp-heading-')).map(r => {
@@ -47,7 +56,13 @@ export function previewRanges(state: EditorState, activeLines: Set<number>): Pre
       // The active table remains completely editable, including inline delimiters.
       return false;
     }
-    if (node.name === 'Image') return false;
+    if (node.name === 'Image') {
+      const url = node.node.getChild('URL');
+      if (!url) return false; // 无 URL 的图片引用（如 ![[...]] 被解析为 Image）交给双链嵌入扫描处理
+      const label = node.node.getChild('LinkLabel');
+      if (!active(node.from, node.to)) result.push({ kind: 'image', from: node.from, to: node.to, target: state.doc.sliceString(url.from, url.to), text: label ? state.doc.sliceString(label.from, label.to) : '' });
+      return false;
+    }
     const heading = node.name.match(/^(?:ATX|Setext)Heading(\d)$/);
     if (heading) result.push({ kind: 'line', from: state.doc.lineAt(node.from).from, to: state.doc.lineAt(node.from).from, className: 'lp-heading-' + heading[1] });
     if (node.name === 'Blockquote') {
@@ -58,9 +73,19 @@ export function previewRanges(state: EditorState, activeLines: Set<number>): Pre
     }
     if (node.name === 'ListItem') result.push({ kind: 'line', from: state.doc.lineAt(node.from).from, to: state.doc.lineAt(node.from).from, className: 'lp-list' });
     if (node.name === 'Link') {
-      result.push({ kind: 'mark', from: node.from, to: node.to, className: 'lp-link' });
+      const marks = node.node.getChildren('LinkMark'); // 依次为 [ ] ( )
+      const openParen = marks.length >= 3 ? marks[2] : null;
+      const urls = node.node.getChildren('URL');
+      const destUrl = openParen ? urls.find(u => u.from > openParen.from) : urls[0];
+      const target = destUrl ? state.doc.sliceString(destUrl.from, destUrl.to) : '';
+      const labelEmpty = marks.length >= 2 && state.doc.sliceString(marks[0].to, marks[1].from).trim() === '';
+      result.push({ kind: 'mark', from: node.from, to: node.to, className: 'lp-link', attributes: { 'data-url': target } });
       if (!active(node.from, node.to)) for (let child = node.node.firstChild; child; child = child.nextSibling) {
-        if (['LinkMark', 'LinkLabel', 'URL', 'LinkTitle'].includes(child.name)) result.push({ kind: 'hide', from: child.from, to: child.to });
+        if (child.name === 'LinkMark' || child.name === 'LinkTitle') { result.push({ kind: 'hide', from: child.from, to: child.to }); continue; }
+        if (child.name === 'URL') {
+          const isDest = openParen != null && child.from > openParen.from;
+          if (isDest && !labelEmpty) result.push({ kind: 'hide', from: child.from, to: child.to });
+        }
       }
     }
     if (node.name === 'HorizontalRule' && !active(node.from, node.to)) { result.push({ kind: 'rule', from: node.from, to: node.to }); return false; }
@@ -108,9 +133,9 @@ const inlinePreview = ViewPlugin.fromClass(class {
     for (const range of previewRanges(view.state, active)) {
       if (range.kind === 'line') decorations.push(Decoration.line({ class: range.className }).range(range.from));
       else if (range.kind === 'hide') decorations.push(Decoration.replace({}).range(range.from, range.to));
-      else if (range.kind === 'mark') decorations.push(Decoration.mark({ class: range.className }).range(range.from, range.to));
+      else if (range.kind === 'mark') decorations.push(Decoration.mark({ class: range.className, attributes: range.attributes }).range(range.from, range.to));
       else if (range.kind === 'task') decorations.push(Decoration.replace({ widget: new TaskWidget(/x/i.test(view.state.doc.sliceString(range.from, range.to)), range.from, !view.state.facet(taskTogglePermission)) }).range(range.from, range.to));
-      else if (range.kind !== 'table') decorations.push(Decoration.replace({ widget: new LabelWidget(range.kind, range.text || '') }).range(range.from, range.to));
+      else if (range.kind !== 'table' && range.kind !== 'image') decorations.push(Decoration.replace({ widget: new LabelWidget(range.kind, range.text || '') }).range(range.from, range.to));
     }
     return Decoration.set(decorations, true);
   }
@@ -209,11 +234,11 @@ class TableWidget extends WidgetType {
 }
 const previewFocus = StateEffect.define<boolean>();
 const blockPreview = StateField.define<{ focused: boolean; decorations: DecorationSet }>({
-  create(state) { return { focused: false, decorations: tableDecorations(state, false) }; },
+  create(state) { return { focused: false, decorations: blockDecorations(state, false) }; },
   update(value, transaction) {
     let focused = value.focused;
     for (const effect of transaction.effects) if (effect.is(previewFocus)) focused = effect.value;
-    if (transaction.docChanged || transaction.selection || focused !== value.focused || transaction.startState.readOnly !== transaction.state.readOnly) return { focused, decorations: tableDecorations(transaction.state, focused) };
+    if (transaction.docChanged || transaction.selection || focused !== value.focused || transaction.startState.readOnly !== transaction.state.readOnly || transaction.startState.facet(noteAssetsFacet) !== transaction.state.facet(noteAssetsFacet)) return { focused, decorations: blockDecorations(transaction.state, focused) };
     return value;
   },
   provide: field => EditorView.decorations.from(field, value => value.decorations),
@@ -227,13 +252,89 @@ export function syncPreviewFocus(view: EditorView) {
   const value = view.state.field(blockPreview, false);
   if (value && value.focused !== view.hasFocus) view.dispatch({ effects: previewFocus.of(view.hasFocus) });
 }
-function tableDecorations(state: EditorState, focused: boolean) {
+function blockDecorations(state: EditorState, focused: boolean) {
   const active = new Set<number>();
   if (focused) for (const selection of state.selection.ranges) for (let line = state.doc.lineAt(selection.from).number; line <= state.doc.lineAt(selection.to).number; line++) active.add(line);
-  return Decoration.set(previewRanges(state, active).filter(range => range.kind === 'table').map(range => Decoration.replace({ block: true, widget: new TableWidget(state.doc.sliceString(range.from, range.to), range.from, findTable(state, range.from), state) }).range(range.from, range.to)), true);
+  const assets = state.facet(noteAssetsFacet);
+  const decorations: Range<Decoration>[] = [];
+  for (const range of previewRanges(state, active)) {
+    if (range.kind === 'table') decorations.push(Decoration.replace({ block: true, widget: new TableWidget(state.doc.sliceString(range.from, range.to), range.from, findTable(state, range.from), state) }).range(range.from, range.to));
+    else if (range.kind === 'image') decorations.push(Decoration.replace({ block: true, widget: new ImageWidget('image', range.target || '', range.text || '', assets) }).range(range.from, range.to));
+  }
+  for (const ref of findReferences(state.doc.toString())) {
+    if (ref.kind !== 'embed') continue;
+    if (active.has(state.doc.lineAt(ref.start).number)) continue;
+    const resolved = assets?.images.get('embed:' + ref.target);
+    if (resolved?.status === 'not-image') continue; // 非图片嵌入（笔记）保留原文
+    decorations.push(Decoration.replace({ block: true, widget: new ImageWidget('embed', ref.target, '', assets) }).range(ref.start, ref.end));
+  }
+  return Decoration.set(decorations, true);
 }
+let lightbox: HTMLElement | null = null;
+function onLightboxKey(event: KeyboardEvent) { if (event.key === 'Escape') closeLightbox(); }
+function openLightbox(src: string, alt: string) {
+  closeLightbox();
+  lightbox = document.createElement('div');
+  lightbox.className = 'lp-lightbox';
+  lightbox.setAttribute('role', 'dialog');
+  lightbox.setAttribute('aria-label', alt || '图片');
+  const img = document.createElement('img');
+  img.src = src; img.alt = alt;
+  lightbox.append(img);
+  lightbox.addEventListener('click', closeLightbox);
+  window.addEventListener('keydown', onLightboxKey);
+  document.body.append(lightbox);
+}
+function closeLightbox() { if (lightbox) { lightbox.remove(); lightbox = null; window.removeEventListener('keydown', onLightboxKey); } }
+
+class ImageWidget extends WidgetType {
+  constructor(readonly kind: 'image' | 'embed', readonly target: string, readonly alt: string, readonly assets: NoteAssets | null) { super(); }
+  eq(other: ImageWidget) { return other.kind === this.kind && other.target === this.target && other.alt === this.alt && other.assets === this.assets; }
+  toDOM() {
+    const wrap = document.createElement('div');
+    wrap.className = 'lp-image-preview';
+    const resolved = this.assets?.images.get(this.kind + ':' + this.target);
+    const url = resolved?.status === 'ok' || resolved?.status === 'external' ? resolved.url : undefined;
+    if (url) {
+      const img = document.createElement('img');
+      img.src = url; img.alt = this.alt; img.loading = 'lazy';
+      img.addEventListener('error', () => { wrap.classList.add('lp-image-missing'); wrap.replaceChildren(this.placeholder('图片不存在或无法读取')); });
+      img.addEventListener('click', () => openLightbox(url, this.alt));
+      wrap.append(img);
+      return wrap;
+    }
+    wrap.classList.add('lp-image-missing');
+    wrap.append(this.placeholder(resolved ? (resolved.status === 'ambiguous' ? '无法确定图片路径' : resolved.status === 'external' ? '不支持的外部图片' : '图片不存在或无法读取') : '加载图片…'));
+    return wrap;
+  }
+  placeholder(text: string): HTMLElement {
+    const box = document.createElement('span');
+    box.className = 'lp-image-missing-box';
+    box.textContent = text;
+    box.title = this.target;
+    return box;
+  }
+  ignoreEvent() { return true; }
+}
+
 export const livePreview = [blockPreview, inlinePreview, EditorView.domEventHandlers({
   focus: (_event, view) => { view.dispatch({ effects: previewFocus.of(true) }); },
   blur: (_event, view) => { view.dispatch({ effects: previewFocus.of(false) }); },
+  click: (event, view) => {
+    const link = (event.target as HTMLElement).closest<HTMLElement>('.lp-link');
+    if (!link) return false;
+    const url = link.dataset.url;
+    if (!url) return false;
+    if (/^(https?:|mailto:)/.test(url)) { void window.plainote?.openExternal(url); return true; }
+    const assets = view.state.facet(noteAssetsFacet);
+    const notePath = assets?.notePath ?? '';
+    void window.plainote?.resolveTarget(url, notePath).then(result => {
+      if (!result.ok) return;
+      const { status, path } = result.value;
+      if (status === 'note' && path) assets?.openNote?.(path);
+      else if (status === 'attachment' && path) void window.plainote?.openPath(path);
+    });
+    return true;
+  },
 })];
 

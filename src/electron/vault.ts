@@ -61,6 +61,77 @@ export class VaultService {
     await walk(this.root, '');
     return result.sort((a, b) => a.path.localeCompare(b.path, 'zh-CN'));
   }
+  async scanEntries(): Promise<NoteFile[]> {
+    const result: NoteFile[] = [];
+    const walk = async (directory: string, prefix: string) => {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue;
+        const relative = prefix + entry.name;
+        if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative + '/');
+        else if (entry.isFile()) {
+          const isNote = /\.md$/i.test(entry.name);
+          if (isNote && relative.toLowerCase() === INDEX_FILE.toLowerCase()) continue;
+          try {
+            const stat = await lstat(path.join(directory, entry.name));
+            if (stat.isFile() && !stat.isSymbolicLink()) result.push({ path: relative, name: isNote ? entry.name.replace(/\.md$/i, '') : entry.name, modified: stat.mtimeMs, size: stat.size });
+          } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        }
+      }
+    };
+    await walk(this.root, '');
+    return result.sort((a, b) => a.path.localeCompare(b.path, 'zh-CN'));
+  }
+  async scanAll(): Promise<string[]> {
+    const result: string[] = [];
+    const walk = async (directory: string, prefix: string) => {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue;
+        const relative = prefix + entry.name;
+        if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative + '/');
+        else if (entry.isFile()) {
+          try {
+            const stat = await lstat(path.join(directory, entry.name));
+            if (stat.isFile() && !stat.isSymbolicLink()) result.push(relative);
+          } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        }
+      }
+    };
+    await walk(this.root, '');
+    return result.sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  }
+  async resolveResource(relative: string): Promise<string> {
+    const parts = this.validateRelative(relative, false);
+    let current = this.root;
+    for (let i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      let stat;
+      try { stat = await lstat(current); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new VaultError('NOT_FOUND', '附件已经不存在。'); throw error; }
+      if (stat.isSymbolicLink() || (i < parts.length - 1 && !stat.isDirectory()) || (i === parts.length - 1 && !stat.isFile())) throw new VaultError('INVALID_PATH', '该路径不是笔记库中的普通文件。');
+    }
+    return current;
+  }
+  async directoryPath(relative: string): Promise<string> {
+    if (!relative) return this.root;
+    const parts = this.validateRelative(relative, false);
+    let current = this.root;
+    for (let i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      let stat;
+      try { stat = await lstat(current); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new VaultError('NOT_FOUND', '目录已经不存在。'); throw error; }
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new VaultError('INVALID_PATH', '该路径不是笔记库中的目录。');
+    }
+    return current;
+  }
+  async isDirectory(relative: string): Promise<boolean> {
+    const parts = this.validateRelative(relative, false);
+    let current = this.root;
+    for (const part of parts) current = path.join(current, part);
+    const stat = await lstat(current);
+    if (stat.isSymbolicLink()) throw new VaultError('INVALID_PATH', '不能对符号链接操作。');
+    return stat.isDirectory();
+  }
   async read(relative: string): Promise<NoteSnapshot> {
     const filename = await this.notePath(relative);
     const handle = await open(filename, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
@@ -211,12 +282,57 @@ export class VaultService {
     }
   }
   async rename(relative: string, newRelative: string): Promise<void> {
+    if (newRelative === relative) throw new VaultError('INVALID_PATH', '目标与原位置相同。');
+    if (newRelative.startsWith(relative + '/')) throw new VaultError('INVALID_PATH', '不能把目录移动到自身或其子目录。');
     return this.queued('rename:' + relative, async () => {
       const from = await this.resolveEntry(relative, true);
       const to = await this.resolveEntry(newRelative, false);
       await rename(from, to);
       await this.remapRecoveries(relative, newRelative);
     });
+  }
+  async countDirectory(relative: string): Promise<{ notes: number; attachments: number; files: number }> {
+    const files = await this.scanAll();
+    const prefix = relative + '/';
+    const under = files.filter(f => f.startsWith(prefix));
+    const notes = under.filter(f => /\.md$/i.test(f)).length;
+    return { notes, attachments: under.length - notes, files: under.length };
+  }
+  async trashDirectory(relative: string, moveToTrash: (filename: string) => Promise<void>): Promise<void> {
+    this.validateRelative(relative, false);
+    return this.queued('directory:' + relative, async () => {
+      const filename = await this.directoryPath(relative);
+      await moveToTrash(filename);
+      for (const recovery of await this.listRecovery()) {
+        if (recovery.path === relative || recovery.path.startsWith(relative + '/')) await this.clearRecovery(recovery.path).catch(() => {});
+      }
+    });
+  }
+  private async uniqueWrite(directory: string, filename: string, bytes: Buffer): Promise<string> {
+    const ext = path.extname(filename);
+    const stem = path.basename(filename, ext);
+    for (let n = 0; ; n++) {
+      const candidate = n === 0 ? filename : `${stem} ${n}${ext}`;
+      try {
+        const handle = await open(path.join(directory, candidate), 'wx', 0o644);
+        try { await handle.writeFile(bytes); await handle.sync(); }
+        finally { await handle.close(); }
+        return candidate;
+      } catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue; throw error; }
+    }
+  }
+  async writeAttachment(relDir: string, filename: string, bytes: Buffer): Promise<string> {
+    const safe = filename.replace(/[\\/:*?"<>|\0]/g, '').replace(/^\.+/, '').trim() || 'image';
+    const parts = relDir ? this.validateRelative(relDir, false) : [];
+    let current = this.root;
+    for (let i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      try { await mkdir(current); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new VaultError('INVALID_PATH', '附件目录无效。');
+    }
+    return this.uniqueWrite(current, safe, bytes);
   }
   async create(relative: string, content: string): Promise<NoteSnapshot> {
     const filename = await this.notePath(relative, true);

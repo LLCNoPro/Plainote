@@ -6,14 +6,14 @@ import { SaveSession } from '../shared/save-session.ts';
 import { CloseAttempt } from '../shared/close-attempt.ts';
 import { flushSessions } from '../shared/flush-sessions.ts';
 import type { EditorMode } from '../shared/editor-mode.ts';
-import { extractHeadings } from './preview.ts';
+import { extractHeadings, type NoteAssets } from './preview.ts';
 import { THEMES } from './themes.ts';
 import { AiPanel } from './AiPanel.tsx';
 import type { AiConfig } from '../shared/ai.ts';
-import type { NoteFile, NoteSnapshot, PlainoteBridge, RecoverySnapshot, VaultInfo } from '../shared/types.ts';
+import type { AttachmentConfig, DirectoryCount, MaintenanceOutcome, NoteFile, NoteSnapshot, PlainoteBridge, RecoverySnapshot, ResolvedImage, VaultInfo } from '../shared/types.ts';
 
 declare global { interface Window { plainote?: PlainoteBridge } }
-type ModalState = { type: 'quick' } | { type: 'settings'; prompt?: string } | { type: 'create'; content: string; suggested: string; original?: string; recoveryPath?: string } | { type: 'conflict'; notePath: string; disk: NoteSnapshot } | { type: 'recovery'; notePath: string; recovery: RecoverySnapshot } | { type: 'recoveries' } | { type: 'directory' } | { type: 'delete'; notePath: string; revision: string; content: string } | { type: 'rename'; kind: 'file' | 'directory'; path: string };
+type ModalState = { type: 'quick' } | { type: 'settings'; prompt?: string } | { type: 'create'; content: string; suggested: string; original?: string; recoveryPath?: string } | { type: 'conflict'; notePath: string; disk: NoteSnapshot } | { type: 'recovery'; notePath: string; recovery: RecoverySnapshot } | { type: 'recoveries' } | { type: 'directory' } | { type: 'delete'; notePath: string; revision: string; content: string } | { type: 'rename'; kind: 'file' | 'directory'; path: string } | { type: 'move'; kind: 'file' | 'directory'; path: string } | { type: 'delete-directory'; path: string; count: DirectoryCount };
 const isSaving = (session: SaveSession) => session.status === 'saving';
 const nameOf = (p: string) => p.split('/').at(-1)!.replace(/\.md$/i, '');
 
@@ -24,14 +24,16 @@ function Modal({ title, close, children }: { title: string; close: () => void; c
     <div className="dialog-heading"><h2>{title}</h2><button className="icon-button" aria-label="关闭对话框" onClick={close}><Icon name="close" /></button></div><div className="dialog-body">{children}</div>
   </dialog>;
 }
-function FileRow({ file, active, depth = 0, open, remove, rename }: { file: NoteFile; active: string; depth?: number; open: (p: string) => void; remove: (p: string) => void; rename: (p: string) => void }) {
-  return <div className="file-entry"><button className={'file-row' + (active === file.path ? ' selected' : '')} style={{ paddingLeft: 9 + depth * 15 }} title={file.path} aria-current={active === file.path ? 'page' : undefined} onClick={() => open(file.path)}><Icon name="file" /><span>{file.name}</span></button><button className="icon-button file-rename" aria-label={'重命名笔记 ' + file.path} title="重命名" onClick={() => rename(file.path)}><Icon name="pencil" /></button><button className="icon-button file-delete" aria-label={'删除笔记 ' + file.path} title="删除笔记" onClick={() => remove(file.path)}><Icon name="trash" /></button></div>;
+function FileRow({ file, active, depth = 0, open, remove, rename, move }: { file: NoteFile; active: string; depth?: number; open: (p: string) => void; remove: (p: string) => void; rename: (p: string) => void; move: (p: string) => void }) {
+  const isNote = /\.md$/i.test(file.path);
+  const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(file.path);
+  return <div className="file-entry"><button className={'file-row' + (active === file.path ? ' selected' : '') + (isNote ? '' : ' attachment')} style={{ paddingLeft: 9 + depth * 15 }} title={file.path} aria-current={active === file.path ? 'page' : undefined} draggable onDragStart={event => { event.dataTransfer.setData('text/plain', file.path); event.dataTransfer.effectAllowed = 'move'; }} onClick={() => open(file.path)}><Icon name={isImage ? 'image' : 'file'} /><span>{file.name}</span></button>{isNote && <><button className="icon-button file-move" aria-label={'移动笔记 ' + file.path} title="移动到…" onClick={() => move(file.path)}><Icon name="move" /></button><button className="icon-button file-rename" aria-label={'重命名笔记 ' + file.path} title="重命名" onClick={() => rename(file.path)}><Icon name="pencil" /></button><button className="icon-button file-delete" aria-label={'删除笔记 ' + file.path} title="删除笔记" onClick={() => remove(file.path)}><Icon name="trash" /></button></>}</div>;
 }
-function FileTree({ files, directories, selectedDirectory, active, open, remove, rename, chooseDirectory }: { files: NoteFile[]; directories: string[]; selectedDirectory: string; active: string; open: (p: string) => void; remove: (p: string) => void; rename: (kind: 'file' | 'directory', path: string) => void; chooseDirectory: (p: string) => void }) {
+function FileTree({ files, directories, selectedDirectory, active, open, remove, rename, move, removeDirectory, drop, chooseDirectory }: { files: NoteFile[]; directories: string[]; selectedDirectory: string; active: string; open: (p: string) => void; remove: (p: string) => void; rename: (kind: 'file' | 'directory', path: string) => void; move: (kind: 'file' | 'directory', path: string) => void; removeDirectory: (p: string) => void; drop: (src: string, targetDir: string) => void; chooseDirectory: (p: string) => void }) {
   const render = (prefix: string, depth: number): React.ReactNode => {
     const children = files.filter(f => f.path.startsWith(prefix));
     const dirs = [...new Set([...directories.filter(p => p.startsWith(prefix)).map(p => p.slice(prefix.length).split('/')[0]), ...children.map(f => f.path.slice(prefix.length).split('/')).filter(parts => parts.length > 1).map(parts => parts[0])])].filter(Boolean).sort((a,b) => a.localeCompare(b,'zh-CN'));
-    return <>{dirs.map(directory => <details key={directory}><summary data-selected={selectedDirectory === prefix + directory} title={prefix + directory} style={{ paddingLeft: 8 + depth * 15 }} onClick={() => chooseDirectory(prefix + directory)}><Icon name="chevron" /><Icon name="folder" /><span>{directory}</span><button className="icon-button dir-rename" aria-label={'重命名目录 ' + (prefix + directory)} title="重命名" onClick={event => { event.preventDefault(); event.stopPropagation(); rename('directory', prefix + directory); }}><Icon name="pencil" /></button></summary>{render(prefix + directory + '/', depth + 1)}</details>)}{children.filter(f => !f.path.slice(prefix.length).includes('/')).map(file => <FileRow key={file.path} file={file} active={active} depth={depth} open={open} remove={remove} rename={p => rename('file', p)} />)}</>;
+    return <>{dirs.map(directory => <details key={directory}><summary data-selected={selectedDirectory === prefix + directory} title={prefix + directory} style={{ paddingLeft: 8 + depth * 15 }} draggable onDragStart={event => { event.dataTransfer.setData('text/plain', prefix + directory); event.dataTransfer.effectAllowed = 'move'; }} onDragOver={event => { if (event.dataTransfer.types.includes('text/plain')) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={event => { event.preventDefault(); const src = event.dataTransfer.getData('text/plain'); if (src) drop(src, prefix + directory); }} onClick={() => chooseDirectory(prefix + directory)}><Icon name="chevron" /><Icon name="folder" /><span>{directory}</span><button className="icon-button dir-move" aria-label={'移动目录 ' + (prefix + directory)} title="移动到…" onClick={event => { event.preventDefault(); event.stopPropagation(); move('directory', prefix + directory); }}><Icon name="move" /></button><button className="icon-button dir-rename" aria-label={'重命名目录 ' + (prefix + directory)} title="重命名" onClick={event => { event.preventDefault(); event.stopPropagation(); rename('directory', prefix + directory); }}><Icon name="pencil" /></button><button className="icon-button dir-delete" aria-label={'删除目录 ' + (prefix + directory)} title="删除目录" onClick={event => { event.preventDefault(); event.stopPropagation(); removeDirectory(prefix + directory); }}><Icon name="trash" /></button></summary>{render(prefix + directory + '/', depth + 1)}</details>)}{children.filter(f => !f.path.slice(prefix.length).includes('/')).map(file => <FileRow key={file.path} file={file} active={active} depth={depth} open={open} remove={remove} rename={p => rename('file', p)} move={p => move('file', p)} />)}</>;
   };
   return render('', 0);
 }
@@ -53,6 +55,9 @@ export function App() {
   const [fontSize, setFontSize] = useState(() => Number(localStorage.getItem('plainote-font-size')) || 16);
   const [directories, setDirectories] = useState<string[]>([]), [selectedDirectory, setSelectedDirectory] = useState('');
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>([]);
+  const [attachmentConfig, setAttachmentConfig] = useState<AttachmentConfig>({ mode: 'vault', dir: 'attachments' });
+  const [images, setImages] = useState<Map<string, ResolvedImage>>(new Map());
+  const [moveTarget, setMoveTarget] = useState('');
   const [, setVersion] = useState(0);
   const sessions = useRef(new Map<string, SaveSession>()), timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const activeRef = useRef(''), generation = useRef(0), editor = useRef<EditorView | null>(null), mounted = useRef(true);
@@ -60,6 +65,7 @@ export function App() {
   const closeAttempt = useRef(new CloseAttempt()), pendingCreate = useRef<Promise<void> | null>(null);
   const noteEpochs = useRef(new Map<string, number>());
   const pendingOpens = useRef(new Map<string, ReturnType<PlainoteBridge['read']>>());
+  const imagesRequest = useRef(0);
   const refresh = useCallback(() => { if (mounted.current) setVersion(v => v + 1); }, []);
   const activeSession = sessions.current.get(active);
   const command = bridge?.platform === 'darwin' ? '⌘' : 'Ctrl';
@@ -67,7 +73,7 @@ export function App() {
   const explain = (text: string, kind: 'info' | 'error' = 'info') => { setMessage(text); setMessageKind(kind); };
   const refreshFiles = async () => {
     if (!bridge) return;
-    const token = generation.current, result = await bridge.scan();
+    const token = generation.current, result = await bridge.scanEntries();
     if (token === generation.current && result.ok) setFiles(result.value);
     const dirs = await bridge.directories();
     if (token === generation.current && dirs.ok) setDirectories(dirs.value);
@@ -106,10 +112,17 @@ export function App() {
     if (!sessions.current.has(p)) addSession(result.value);
     if (request !== selectionRequest.current) return;
     select(p); setMessage('');
+    void resolveImagesFor(p, result.value.content);
     const recovery = await bridge.getRecovery(p);
     if (token !== generation.current || noteEpochs.current.get(p) !== epoch) return;
     if (recovery.ok && recovery.value && recovery.value.content !== result.value.content) setModal({ type: 'recovery', notePath: p, recovery: recovery.value });
   };
+  const openPath = async (p: string) => {
+    if (!bridge) return;
+    const result = await bridge.openPath(p);
+    if (!result.ok) explain(result.error.message, 'error');
+  };
+  const openFile = (p: string) => { if (/\.md$/i.test(p)) void openNote(p); else void openPath(p); };
   const flushAll = async () => {
     if (!bridge) return true;
     for (const timer of timers.current.values()) clearTimeout(timer);
@@ -123,7 +136,10 @@ export function App() {
     for (const timer of timers.current.values()) clearTimeout(timer);
     timers.current.clear(); sessions.current.clear(); select('');
     setVault(info); setFiles(info.files); setDirectories(info.directories); setQuery(''); setMessage(''); setModal(null);
-    if (info.files.length) await openNote(info.files[0].path);
+    const cfg = await bridge!.attachmentGetConfig();
+    if (cfg.ok) setAttachmentConfig(cfg.value);
+    const firstNote = info.files.find(f => /\.md$/i.test(f.path));
+    if (firstNote) await openNote(firstNote.path);
     const backups = await bridge!.recoveries();
     if (backups.ok) {
       setRecoveries(backups.value);
@@ -239,8 +255,80 @@ export function App() {
         const pending = pendingOpens.current.get(key); if (pending !== undefined) { pendingOpens.current.delete(key); pendingOpens.current.set(next, pending); }
         if (activeRef.current === key) select(next);
       }
-      await refreshFiles(); refresh(); setModal(null); setMessage('');
+      await refreshFiles(); refresh(); setModal(null); reportOutcome(result.value);
     })().finally(() => { pendingCreate.current = null; mutationBusy.current = false; setCreating(false); });
+  };
+  const requestMove = (kind: 'file' | 'directory', path: string) => {
+    if (!vault || busy || transition.current || pendingCreate.current) return;
+    setMoveTarget(''); setFormError(''); setModal({ type: 'move', kind, path });
+  };
+  const moveWork = async () => {
+    if (modal?.type !== 'move') return;
+    const { kind, path } = modal;
+    await performMove(kind, path, moveTarget, setFormError);
+  };
+  const performMove = async (kind: 'file' | 'directory', path: string, targetDir: string, onError: (msg: string) => void) => {
+    if (!bridge || transition.current || pendingCreate.current) return false;
+    if (kind === 'directory' && (targetDir === path || targetDir.startsWith(path + '/'))) { onError('不能移动到自身或其子目录。'); return false; }
+    if (kind === 'file') { const sourceDir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''; if (targetDir === sourceDir) return false; }
+    for (const [key, session] of sessions.current) {
+      if (key === path || (kind === 'directory' && key.startsWith(path + '/'))) {
+        if (!await session.flush()) { onError('有笔记未能保存，请先处理保存失败或版本冲突。'); return false; }
+      }
+    }
+    mutationBusy.current = true; setCreating(true); setBusy(true);
+    return new Promise<boolean>(resolve => {
+      pendingCreate.current = (async () => {
+        const result = await bridge.move(path, targetDir);
+        if (!result.ok) { onError(result.error.message); resolve(false); return; }
+        const { to } = result.value;
+        const isDir = kind === 'directory';
+        for (const key of [...sessions.current.keys()]) {
+          if (key !== path && !(isDir && key.startsWith(path + '/'))) continue;
+          const s = sessions.current.get(key)!;
+          const next = to + key.slice(path.length);
+          s.path = next;
+          sessions.current.delete(key); sessions.current.set(next, s);
+          const timer = timers.current.get(key); if (timer !== undefined) { timers.current.delete(key); timers.current.set(next, timer); }
+          const epoch = noteEpochs.current.get(key); if (epoch !== undefined) { noteEpochs.current.delete(key); noteEpochs.current.set(next, epoch); }
+          const pending = pendingOpens.current.get(key); if (pending !== undefined) { pendingOpens.current.delete(key); pendingOpens.current.set(next, pending); }
+          if (activeRef.current === key) select(next);
+        }
+        await refreshFiles(); refresh(); setModal(null); reportOutcome(result.value);
+        resolve(true);
+      })().finally(() => { pendingCreate.current = null; mutationBusy.current = false; setCreating(false); if (!transition.current) setBusy(false); });
+    });
+  };
+  const dropMove = (src: string, targetDir: string) => {
+    const kind: 'file' | 'directory' = directories.includes(src) ? 'directory' : 'file';
+    void performMove(kind, src, targetDir, msg => explain(msg, 'error'));
+  };
+  const requestDeleteDirectory = async (path: string) => {
+    if (!bridge || busy || transition.current || pendingCreate.current) return;
+    const result = await bridge.countDirectory(path);
+    if (!result.ok) { explain(result.error.message, 'error'); return; }
+    setFormError(''); setModal({ type: 'delete-directory', path, count: result.value });
+  };
+  const deleteDirectory = async () => {
+    if (!bridge || modal?.type !== 'delete-directory' || transition.current || pendingCreate.current) return;
+    const { path } = modal;
+    for (const [key, session] of sessions.current) {
+      if (key.startsWith(path + '/')) if (!await session.flush()) { setFormError('目录内有笔记未能保存，请先处理保存失败或版本冲突。'); return; }
+    }
+    mutationBusy.current = true; setCreating(true); setBusy(true);
+    const token = generation.current;
+    pendingCreate.current = (async () => {
+      const result = await bridge.trashDirectory(path);
+      if (token !== generation.current) return;
+      if (!result.ok) { setFormError(result.error.message); return; }
+      for (const key of [...sessions.current.keys()]) {
+        if (!key.startsWith(path + '/')) continue;
+        sessions.current.delete(key); timers.current.delete(key); pendingOpens.current.delete(key); noteEpochs.current.delete(key);
+        if (activeRef.current === key) activeRef.current = '';
+      }
+      if (!activeRef.current) select(sessions.current.keys().next().value || '');
+      await refreshFiles(); refresh(); setModal(null); setMessage('目录已移到回收站。');
+    })().finally(() => { pendingCreate.current = null; mutationBusy.current = false; setCreating(false); if (!transition.current) setBusy(false); });
   };
   const exportNote = async () => {
     if (!bridge || !activeSession || busy) return;
@@ -254,7 +342,38 @@ export function App() {
   };
   const getSelection = () => { const view = editor.current; return view && !view.state.selection.main.empty ? view.state.doc.sliceString(view.state.selection.main.from, view.state.selection.main.to) : ''; };
   const applyInsert = (text: string) => { const view = editor.current; if (!view) return; view.dispatch({ changes: { from: view.state.selection.main.from, insert: text } }); view.focus(); };
+  const applyInsertAt = (position: number, text: string) => { const view = editor.current; if (!view) return; const from = Math.max(0, Math.min(position, view.state.doc.length)); view.dispatch({ changes: { from, insert: text }, selection: { anchor: from + text.length } }); view.focus(); };
   const insertText = (text: string) => { if (mode === 'read') { pendingInsert.current = text; setMode('live'); } else applyInsert(text); };
+  const resolveImagesFor = async (notePath: string, content: string) => {
+    if (!bridge) return;
+    const request = ++imagesRequest.current;
+    const result = await bridge.resolveImages(notePath, content);
+    if (request !== imagesRequest.current) return;
+    if (!result.ok) { setImages(new Map()); return; }
+    const map = new Map<string, ResolvedImage>();
+    for (const img of result.value) map.set(img.kind + ':' + img.target, img);
+    setImages(map);
+  };
+  const importImages = async (files: File[], position: number) => {
+    if (!bridge || !vault || !activeSession || transition.current) return;
+    const notePath = activeRef.current;
+    const token = generation.current, epoch = noteEpochs.current.get(notePath);
+    let cursor = position;
+    for (const file of files) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = await bridge.importAttachment(file.name, bytes, notePath);
+      if (token !== generation.current || noteEpochs.current.get(notePath) !== epoch) return;
+      if (!result.ok) { explain(result.error.message, 'error'); return; }
+      const text = '![' + file.name.replace(/[[\]]/g, '') + '](' + result.value.path + ')\n';
+      applyInsertAt(cursor, text);
+      cursor += text.length;
+    }
+  };
+  const updateAttachment = (patch: Partial<AttachmentConfig>) => { const next = { ...attachmentConfig, ...patch }; setAttachmentConfig(next); void bridge?.attachmentSetConfig(next); };
+  const reportOutcome = (outcome: MaintenanceOutcome) => {
+    if (outcome.failed.length) { explain('操作完成，但有 ' + outcome.failed.length + ' 篇笔记的引用未能更新。', 'error'); return; }
+    if (outcome.unchanged.length) explain(outcome.unchanged.length + ' 处引用无法解析，已保留原文。');
+  };
   const updateAi = (patch: Partial<AiConfig>) => { const next = { ...aiConfig, ...patch }; setAiConfig(next); void bridge?.aiSetConfig(next); };
   const startResize = (event: React.MouseEvent) => {
     event.preventDefault();
@@ -361,6 +480,18 @@ export function App() {
     return () => clearInterval(interval);
   }, [vault, bridge]);
 
+  useEffect(() => { setImages(new Map()); imagesRequest.current++; }, [active]);
+  useEffect(() => {
+    if (!bridge || !vault || !activeSession) return;
+    const path = active, content = activeSession.content;
+    if (!path) return;
+    const timer = setTimeout(() => void resolveImagesFor(path, content), 700);
+    return () => clearTimeout(timer);
+  }, [activeSession?.content, active, vault, bridge]);
+  const openNoteRef = useRef(openNote);
+  openNoteRef.current = openNote;
+  const navigateToNote = useCallback((p: string) => { void openNoteRef.current(p); }, []);
+  const noteAssets = useMemo<NoteAssets | null>(() => active ? { notePath: active, images, openNote: navigateToNote } : null, [active, images, navigateToNote]);
   const headings = useMemo(() => extractHeadings(activeSession?.content || ''), [activeSession?.content]);
   const filtered = files.filter(file => (file.name + file.path).toLowerCase().includes(query.toLowerCase()));
   const quickMatches = files.filter(file => (file.name + file.path).toLowerCase().includes(quick.toLowerCase())).slice(0, 50);
@@ -371,18 +502,20 @@ export function App() {
   return <div className={'app' + (!left ? ' hide-left' : '') + (!right ? ' hide-right' : '') + (bridge?.platform === 'win32' ? ' windows' : '')} aria-busy={busy}>
     <header className="titlebar"><div className="traffic-space" /><span className="window-title">素记 <span>Plainote</span></span><div className="title-actions"><button className="icon-button" title="显示或隐藏目录" aria-label="显示或隐藏目录" aria-expanded={left} onClick={() => setLeft(!left)}><Icon name="panel-left" /></button><button className="icon-button" title="显示或隐藏大纲" aria-label="显示或隐藏大纲" aria-expanded={right} onClick={() => setRight(!right)}><Icon name="panel-right" /></button>{bridge?.platform === 'win32' && <div className="window-buttons"><button aria-label="最小化" onClick={() => bridge.minimize()}><Icon name="minimize" /></button><button aria-label="最大化或还原" onClick={() => bridge.toggleMaximize()}><Icon name="maximize" /></button><button aria-label="关闭窗口" onClick={() => bridge.closeWindow()}><Icon name="close" /></button></div>}</div></header>
     <div className="workspace" inert={busy}>
-      <aside className="sidebar" aria-label="笔记目录"><button className="vault-button" disabled={busy || !bridge} onClick={() => void chooseVault()} title={vault?.root || '打开笔记文件夹'}><span className="brand-mark"><Icon name="book" /></span><span><strong>{vault?.name || '打开笔记库'}</strong><small>{vault ? '本地笔记' : '选择一个文件夹'}</small></span><Icon name="chevrons" /></button><label className="search-field"><Icon name="search" /><input aria-label="查找笔记名称" placeholder="查找笔记名称" value={query} onChange={event => setQuery(event.target.value)} /></label><button className="new-note" disabled={!vault || busy} onClick={() => openCreate()}><Icon name="plus" />新建笔记<kbd>{command} N</kbd></button><div className="section-label">文件 <span className="directory-tools"><button className="icon-button" aria-label="新建目录" title="新建目录" disabled={!vault || busy || creating} onClick={openDirectory}><Icon name="folder-plus" /></button><button className="icon-button" title="刷新目录" aria-label="刷新目录" disabled={!vault} onClick={() => void refreshFiles()}><Icon name="refresh" /></button></span></div><div className="files-pane">{busy ? <p className="empty-label">正在处理文件…</p> : query ? <>{filtered.map(file => <FileRow key={file.path} file={file} active={active} open={p => void openNote(p)} remove={p => void requestDelete(p)} rename={p => requestRename('file', p)} />)}{!filtered.length && <p className="empty-label">没有匹配的笔记，试试其他名称。</p>}</> : <FileTree files={files} directories={directories} selectedDirectory={selectedDirectory} active={active} open={p => void openNote(p)} remove={p => void requestDelete(p)} rename={requestRename} chooseDirectory={setSelectedDirectory} />}{vault && !files.length && !directories.length && !busy && <p className="empty-label">这里还没有 Markdown 笔记。<br />新建一篇，开始记录。</p>}</div>{recoveries.length > 0 && <button className="recovery-button" onClick={() => setModal({ type: 'recoveries' })}>恢复未保存内容 ({recoveries.length})</button>}<footer className="sidebar-footer"><button className="icon-button" aria-label="设置" title="设置" onClick={() => setModal({ type: 'settings' })}><Icon name="settings" /></button><button className="theme-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}><Icon name={theme === 'dark' ? 'sun' : 'moon'} />{theme === 'dark' ? '浅色模式' : '深色模式'}</button></footer></aside>
+      <aside className="sidebar" aria-label="笔记目录"><button className="vault-button" disabled={busy || !bridge} onClick={() => void chooseVault()} title={vault?.root || '打开笔记文件夹'}><span className="brand-mark"><Icon name="book" /></span><span><strong>{vault?.name || '打开笔记库'}</strong><small>{vault ? '本地笔记' : '选择一个文件夹'}</small></span><Icon name="chevrons" /></button><label className="search-field"><Icon name="search" /><input aria-label="查找笔记名称" placeholder="查找笔记名称" value={query} onChange={event => setQuery(event.target.value)} /></label><button className="new-note" disabled={!vault || busy} onClick={() => openCreate()}><Icon name="plus" />新建笔记<kbd>{command} N</kbd></button><div className="section-label">文件 <span className="directory-tools"><button className="icon-button" aria-label="新建目录" title="新建目录" disabled={!vault || busy || creating} onClick={openDirectory}><Icon name="folder-plus" /></button><button className="icon-button" title="刷新目录" aria-label="刷新目录" disabled={!vault} onClick={() => void refreshFiles()}><Icon name="refresh" /></button></span></div><div className="files-pane">{busy ? <p className="empty-label">正在处理文件…</p> : query ? <>{filtered.map(file => <FileRow key={file.path} file={file} active={active} open={openFile} remove={p => void requestDelete(p)} rename={p => requestRename('file', p)} move={p => requestMove('file', p)} />)}{!filtered.length && <p className="empty-label">没有匹配的笔记，试试其他名称。</p>}</> : <FileTree files={files} directories={directories} selectedDirectory={selectedDirectory} active={active} open={openFile} remove={p => void requestDelete(p)} rename={requestRename} move={requestMove} removeDirectory={p => void requestDeleteDirectory(p)} drop={dropMove} chooseDirectory={setSelectedDirectory} />}{vault && !files.length && !directories.length && !busy && <p className="empty-label">这里还没有 Markdown 笔记。<br />新建一篇，开始记录。</p>}</div>{recoveries.length > 0 && <button className="recovery-button" onClick={() => setModal({ type: 'recoveries' })}>恢复未保存内容 ({recoveries.length})</button>}<footer className="sidebar-footer"><button className="icon-button" aria-label="设置" title="设置" onClick={() => setModal({ type: 'settings' })}><Icon name="settings" /></button><button className="theme-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}><Icon name={theme === 'dark' ? 'sun' : 'moon'} />{theme === 'dark' ? '浅色模式' : '深色模式'}</button></footer></aside>
       <main className="editor-area"><div className="tabs" role="tablist" aria-label="已打开笔记">{[...sessions.current.values()].map(session => <div key={session.path} className={'tab' + (active === session.path ? ' active' : '')}><button className="tab-select" role="tab" aria-selected={active === session.path} title={session.path} onClick={() => select(session.path)}><Icon name={session.status === 'error' || session.status === 'conflict' ? 'warning' : 'file'} /><span>{nameOf(session.path)}</span>{session.content !== session.savedContent && <span className="dirty-dot" aria-label="未保存" />}</button><button className="tab-close" aria-label={'关闭 ' + nameOf(session.path)} onClick={() => void closeTab(session.path)}><Icon name="close" /></button></div>)}{vault && <button className="tab-add" aria-label="新建笔记" onClick={() => openCreate()}><Icon name="plus" /></button>}</div>
-        {activeSession ? <><div className="editor-toolbar"><div className="breadcrumb" title={active}>{active.split('/').map((part, i) => <span key={i}>{i > 0 && <Icon name="chevron" />}{part.replace(/\.md$/i, '')}</span>)}</div><div className="editor-actions"><div className="editor-modes" role="group" aria-label="正文显示模式"><button className="mode-button" aria-pressed={mode === 'live'} onClick={() => setMode('live')}>即时预览</button><button className="mode-button" aria-pressed={mode === 'source'} onClick={() => setMode('source')}><Icon name="code" />源码</button><button className="mode-button" aria-pressed={mode === 'read'} onClick={() => setMode('read')}><Icon name="book" />阅读模式</button></div><button className="icon-button" aria-label="删除当前笔记" title="删除当前笔记" onClick={() => void requestDelete(active)}><Icon name="trash" /></button><button className="icon-button" aria-label="导出 DOCX" title="导出 DOCX" onClick={() => void exportNote()}><Icon name="export" /></button></div></div>{(activeSession.error || message) && <div className={'notice' + (activeSession.error ? ' error' : '')} role="status"><Icon name={activeSession.error || messageKind === 'error' ? 'warning' : 'check'} /><p>{activeSession.error?.message || message}</p>{activeSession.status === 'conflict' ? <button onClick={() => void compare()}>比较版本</button> : activeSession.error ? <button onClick={() => void activeSession.flush()}>重试保存</button> : <button aria-label="关闭提示" onClick={() => setMessage('')}><Icon name="close" /></button>}{activeSession.error && <button onClick={() => openCreate(activeSession.content, activeSession.path)}>另存为副本</button>}</div>}<Editor path={active} content={activeSession.content} mode={mode} readOnly={busy} onChange={edit} onReady={view => { editor.current = view; }} /></> : <section className="welcome"><span className="welcome-mark"><Icon name="book" /></span><h1>{vault ? '从一篇笔记开始。' : '让笔记回到你手中。'}</h1><p>{vault ? '新建笔记，或从左侧目录打开已有内容。' : '打开本地文件夹，继续使用你的 Markdown 笔记。'}</p><button className="primary-button" disabled={busy || !bridge} onClick={() => vault ? openCreate() : void chooseVault()}>{busy ? '正在加载…' : vault ? '新建笔记' : '打开笔记文件夹'}</button><small>{bridge ? '笔记直接保存在本地，无需导入转换。' : '请通过 npm run dev 启动桌面应用以访问本地文件。'}</small>{message && <p className="welcome-error" role="status">{message}</p>}</section>}</main>
+        {activeSession ? <><div className="editor-toolbar"><div className="breadcrumb" title={active}>{active.split('/').map((part, i) => <span key={i}>{i > 0 && <Icon name="chevron" />}{part.replace(/\.md$/i, '')}</span>)}</div><div className="editor-actions"><div className="editor-modes" role="group" aria-label="正文显示模式"><button className="mode-button" aria-pressed={mode === 'live'} onClick={() => setMode('live')}>即时预览</button><button className="mode-button" aria-pressed={mode === 'source'} onClick={() => setMode('source')}><Icon name="code" />源码</button><button className="mode-button" aria-pressed={mode === 'read'} onClick={() => setMode('read')}><Icon name="book" />阅读模式</button></div><button className="icon-button" aria-label="删除当前笔记" title="删除当前笔记" onClick={() => void requestDelete(active)}><Icon name="trash" /></button><button className="icon-button" aria-label="导出 DOCX" title="导出 DOCX" onClick={() => void exportNote()}><Icon name="export" /></button></div></div>{(activeSession.error || message) && <div className={'notice' + (activeSession.error ? ' error' : '')} role="status"><Icon name={activeSession.error || messageKind === 'error' ? 'warning' : 'check'} /><p>{activeSession.error?.message || message}</p>{activeSession.status === 'conflict' ? <button onClick={() => void compare()}>比较版本</button> : activeSession.error ? <button onClick={() => void activeSession.flush()}>重试保存</button> : <button aria-label="关闭提示" onClick={() => setMessage('')}><Icon name="close" /></button>}{activeSession.error && <button onClick={() => openCreate(activeSession.content, activeSession.path)}>另存为副本</button>}</div>}<Editor path={active} content={activeSession.content} mode={mode} readOnly={busy} noteAssets={noteAssets} onChange={edit} onImportImages={importImages} onReady={view => { editor.current = view; }} /></> : <section className="welcome"><span className="welcome-mark"><Icon name="book" /></span><h1>{vault ? '从一篇笔记开始。' : '让笔记回到你手中。'}</h1><p>{vault ? '新建笔记，或从左侧目录打开已有内容。' : '打开本地文件夹，继续使用你的 Markdown 笔记。'}</p><button className="primary-button" disabled={busy || !bridge} onClick={() => vault ? openCreate() : void chooseVault()}>{busy ? '正在加载…' : vault ? '新建笔记' : '打开笔记文件夹'}</button><small>{bridge ? '笔记直接保存在本地，无需导入转换。' : '请通过 npm run dev 启动桌面应用以访问本地文件。'}</small>{message && <p className="welcome-error" role="status">{message}</p>}</section>}</main>
       <aside className="inspector" aria-label="笔记侧栏"><div className="resize-handle" onMouseDown={startResize} aria-hidden="true" /><div className="inspector-tabs"><button className={'inspector-tab' + (inspectorTab === 'outline' ? ' active' : '')} aria-pressed={inspectorTab === 'outline'} onClick={() => setInspectorTab('outline')}>大纲</button><button className={'inspector-tab' + (inspectorTab === 'ai' ? ' active' : '')} aria-pressed={inspectorTab === 'ai'} onClick={() => setInspectorTab('ai')}>AI 对话</button></div>{inspectorTab === 'outline' ? <><nav className="outline" aria-label="当前笔记大纲">{headings.map((heading, index) => <button key={index} style={{ paddingLeft: 11 + Math.min(heading.level - 1, 3) * 10 }} onClick={() => { const view = editor.current; if (view && heading.line <= view.state.doc.lines) { const line = view.state.doc.line(heading.line); view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'start' }) }); view.focus(); } }}>{heading.text}</button>)}{!headings.length && <p className="empty-label">添加标题后，可以在这里浏览笔记结构。</p>}</nav><p className="inspector-tip">正文直接使用 Markdown。<br />需要精确编辑时，可切换源码模式。</p></> : bridge ? <AiPanel bridge={bridge} note={activeSession ? { path: activeSession.path, name: nameOf(activeSession.path), content: activeSession.content } : null} getSelection={getSelection} onInsert={insertText} onConfigMissing={() => setModal({ type: 'settings', prompt: '请先配置 AI API Key，再使用 AI 对话。' })} /> : <p className="empty-label">AI 对话需要在桌面应用中运行。</p>}</aside>
     </div>
     <footer className="statusbar"><span className={'save-status' + (activeSession?.error ? ' failed' : '')}><Icon name={activeSession?.error ? 'warning' : 'check'} />{activeSession ? statuses[activeSession.status] : '本地笔记'}{dirty.length > 1 && ` · ${dirty.length} 篇待保存`}</span><span className="vault-path" title={vault?.root}>{vault?.root}</span><div><span>{activeSession ? `${activeSession.content.replace(/\s/g, '').length} 字` : `${files.length} 篇笔记`}</span>{activeSession && <span>{mode === 'source' ? '源码模式' : mode === 'read' ? '阅读模式 · 正文只读' : '即时预览'}</span>}</div></footer>
-    {modal && <Modal title={modal.type === 'quick' ? '快速打开笔记' : modal.type === 'settings' ? '设置' : modal.type === 'create' ? '新建笔记' : modal.type === 'conflict' ? '这篇笔记有两个版本' : modal.type === 'directory' ? '新建目录' : modal.type === 'delete' ? '删除笔记' : modal.type === 'rename' ? (modal.kind === 'file' ? '重命名笔记' : '重命名目录') : modal.type === 'recoveries' ? '恢复未保存内容' : '发现未保存的恢复内容'} close={closeModal}><fieldset className="modal-controls" disabled={busy}>
-      {modal.type === 'quick' && <><input className="quick-input" autoFocus aria-label="快速打开笔记" placeholder="输入笔记名称或路径…" value={quick} onChange={event => { setQuick(event.target.value); setQuickIndex(0); }} onKeyDown={event => { if (['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) event.preventDefault(); if (event.key === 'ArrowDown') setQuickIndex(Math.min(selectedQuick + 1, quickMatches.length - 1)); if (event.key === 'ArrowUp') setQuickIndex(Math.max(0, selectedQuick - 1)); if (event.key === 'Enter' && quickMatches[selectedQuick]) { void openNote(quickMatches[selectedQuick].path); setModal(null); } }} /><div className="quick-results">{quickMatches.map((file, i) => <button key={file.path} className={'quick-row' + (i === selectedQuick ? ' current' : '')} onClick={() => { void openNote(file.path); setModal(null); }}><Icon name="file" /><span>{file.name}<small>{file.path}</small></span></button>)}{!quickMatches.length && <p className="empty-label">没有匹配的笔记。</p>}</div><p className="dialog-copy">方向键选择，回车打开，Esc 关闭。</p></>}
-      {modal.type === 'settings' && <><p className="dialog-copy">调整适合自己的阅读与工作环境。</p>{modal.prompt && <p className="form-error" role="alert">{modal.prompt}</p>}<div className="setting-row"><div><strong>外观</strong><small>暖白与墨色为底，深浅随环境切换。</small></div><div className="segmented"><button aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>浅色</button><button aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>深色</button></div></div><div className="setting-row"><div><strong>主题色</strong><small>选择界面的强调色。</small></div><div className="accent-swatches">{THEMES.map(a => <button key={a.id} className="accent-swatch" style={{ background: (theme === 'dark' ? a.dark : a.light).accent }} aria-pressed={accent === a.id} aria-label={'主题色 ' + a.name} title={a.name} onClick={() => setAccent(a.id)} />)}</div></div><div className="setting-row"><div><strong>Pandoc 路径</strong><small>导出 Word 文档使用，留空则用系统 PATH 中的 pandoc。</small></div><input className="pandoc-input" aria-label="Pandoc 路径" placeholder="pandoc 或 /usr/local/bin/pandoc" value={pandocPath} onChange={event => { const v = event.target.value; setPandocPath(v); localStorage.setItem('plainote-pandoc', v); }} /></div><div className="setting-row"><div><strong>接口协议</strong><small>Anthropic 兼容为 DeepSeek 官方接口；OpenAI 兼容用于内网 vLLM / 自建服务。</small></div><div className="segmented"><button aria-pressed={aiConfig.protocol === 'anthropic'} onClick={() => updateAi({ protocol: 'anthropic' })}>Anthropic 兼容</button><button aria-pressed={aiConfig.protocol === 'openai'} onClick={() => updateAi({ protocol: 'openai' })}>OpenAI 兼容</button></div></div><div className="setting-row"><div><strong>API 地址</strong><small>{aiConfig.protocol === 'openai' ? 'OpenAI 兼容地址需包含 /v1，如 http://10.x.x.x:9830/v1。' : 'Anthropic 兼容地址，默认 DeepSeek。'}</small></div><input className="pandoc-input" aria-label="AI API 地址" placeholder={aiConfig.protocol === 'openai' ? 'http://10.x.x.x:9830/v1' : 'https://api.deepseek.com/anthropic'} value={aiConfig.baseUrl} onChange={e => updateAi({ baseUrl: e.target.value })} /></div><div className="setting-row"><div><strong>API Key</strong><small>保存在本地。</small></div><input className="pandoc-input" type="password" aria-label="AI API Key" placeholder="sk-..." value={aiConfig.apiKey} onChange={e => updateAi({ apiKey: e.target.value })} /></div><div className="setting-row"><div><strong>模型</strong><small>如 deepseek-chat。</small></div><input className="pandoc-input" aria-label="AI 模型" placeholder="deepseek-chat" value={aiConfig.model} onChange={e => updateAi({ model: e.target.value })} /></div><div className="setting-row"><div><strong>正文字号</strong><small>{fontSize} px</small></div><input aria-label="正文字号" type="range" min="14" max="22" value={fontSize} onChange={event => setFontSize(Number(event.target.value))} /></div><div className="setting-row"><div><strong>当前笔记库</strong><small className="settings-path">{vault?.root || '还未打开'}</small></div></div></>}
+    {modal && <Modal title={modal.type === 'quick' ? '快速打开笔记' : modal.type === 'settings' ? '设置' : modal.type === 'create' ? '新建笔记' : modal.type === 'conflict' ? '这篇笔记有两个版本' : modal.type === 'directory' ? '新建目录' : modal.type === 'delete' ? '删除笔记' : modal.type === 'rename' ? (modal.kind === 'file' ? '重命名笔记' : '重命名目录') : modal.type === 'move' ? (modal.kind === 'file' ? '移动笔记' : '移动目录') : modal.type === 'delete-directory' ? '删除目录' : modal.type === 'recoveries' ? '恢复未保存内容' : '发现未保存的恢复内容'} close={closeModal}><fieldset className="modal-controls" disabled={busy}>
+      {modal.type === 'quick' && <><input className="quick-input" autoFocus aria-label="快速打开笔记" placeholder="输入笔记名称或路径…" value={quick} onChange={event => { setQuick(event.target.value); setQuickIndex(0); }} onKeyDown={event => { if (['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) event.preventDefault(); if (event.key === 'ArrowDown') setQuickIndex(Math.min(selectedQuick + 1, quickMatches.length - 1)); if (event.key === 'ArrowUp') setQuickIndex(Math.max(0, selectedQuick - 1)); if (event.key === 'Enter' && quickMatches[selectedQuick]) { openFile(quickMatches[selectedQuick].path); setModal(null); } }} /><div className="quick-results">{quickMatches.map((file, i) => <button key={file.path} className={'quick-row' + (i === selectedQuick ? ' current' : '')} onClick={() => { openFile(file.path); setModal(null); }}><Icon name="file" /><span>{file.name}<small>{file.path}</small></span></button>)}{!quickMatches.length && <p className="empty-label">没有匹配的笔记。</p>}</div><p className="dialog-copy">方向键选择，回车打开，Esc 关闭。</p></>}
+      {modal.type === 'settings' && <><p className="dialog-copy">调整适合自己的阅读与工作环境。</p>{modal.prompt && <p className="form-error" role="alert">{modal.prompt}</p>}<div className="setting-row"><div><strong>外观</strong><small>暖白与墨色为底，深浅随环境切换。</small></div><div className="segmented"><button aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>浅色</button><button aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>深色</button></div></div><div className="setting-row"><div><strong>主题色</strong><small>选择界面的强调色。</small></div><div className="accent-swatches">{THEMES.map(a => <button key={a.id} className="accent-swatch" style={{ background: (theme === 'dark' ? a.dark : a.light).accent }} aria-pressed={accent === a.id} aria-label={'主题色 ' + a.name} title={a.name} onClick={() => setAccent(a.id)} />)}</div></div><div className="setting-row"><div><strong>Pandoc 路径</strong><small>导出 Word 文档使用，留空则用系统 PATH 中的 pandoc。</small></div><input className="pandoc-input" aria-label="Pandoc 路径" placeholder="pandoc 或 /usr/local/bin/pandoc" value={pandocPath} onChange={event => { const v = event.target.value; setPandocPath(v); localStorage.setItem('plainote-pandoc', v); }} /></div><div className="setting-row"><div><strong>接口协议</strong><small>Anthropic 兼容为 DeepSeek 官方接口；OpenAI 兼容用于内网 vLLM / 自建服务。</small></div><div className="segmented"><button aria-pressed={aiConfig.protocol === 'anthropic'} onClick={() => updateAi({ protocol: 'anthropic' })}>Anthropic 兼容</button><button aria-pressed={aiConfig.protocol === 'openai'} onClick={() => updateAi({ protocol: 'openai' })}>OpenAI 兼容</button></div></div><div className="setting-row"><div><strong>API 地址</strong><small>{aiConfig.protocol === 'openai' ? 'OpenAI 兼容地址需包含 /v1，如 http://10.x.x.x:9830/v1。' : 'Anthropic 兼容地址，默认 DeepSeek。'}</small></div><input className="pandoc-input" aria-label="AI API 地址" placeholder={aiConfig.protocol === 'openai' ? 'http://10.x.x.x:9830/v1' : 'https://api.deepseek.com/anthropic'} value={aiConfig.baseUrl} onChange={e => updateAi({ baseUrl: e.target.value })} /></div><div className="setting-row"><div><strong>API Key</strong><small>保存在本地。</small></div><input className="pandoc-input" type="password" aria-label="AI API Key" placeholder="sk-..." value={aiConfig.apiKey} onChange={e => updateAi({ apiKey: e.target.value })} /></div><div className="setting-row"><div><strong>模型</strong><small>如 deepseek-chat。</small></div><input className="pandoc-input" aria-label="AI 模型" placeholder="deepseek-chat" value={aiConfig.model} onChange={e => updateAi({ model: e.target.value })} /></div><div className="setting-row"><div><strong>正文字号</strong><small>{fontSize} px</small></div><input aria-label="正文字号" type="range" min="14" max="22" value={fontSize} onChange={event => setFontSize(Number(event.target.value))} /></div><div className="setting-row"><div><strong>附件位置</strong><small>新导入的图片保存到哪里，变更只影响新附件。</small></div><div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'flex-end' }}><div className="segmented"><button aria-pressed={attachmentConfig.mode === 'vault'} onClick={() => updateAttachment({ mode: 'vault' })}>统一目录</button><button aria-pressed={attachmentConfig.mode === 'note'} onClick={() => updateAttachment({ mode: 'note' })}>当前笔记旁</button></div><input className="pandoc-input" aria-label="附件目录" value={attachmentConfig.dir} onChange={e => updateAttachment({ dir: e.target.value })} placeholder="attachments" /></div></div><div className="setting-row"><div><strong>当前笔记库</strong><small className="settings-path">{vault?.root || '还未打开'}</small></div></div></>}
       {modal.type === 'directory' && <form onSubmit={makeDirectory}><p className="dialog-copy">目录保存在当前笔记库中。使用 / 分隔可创建嵌套目录。</p><label className="form-label">目录名称<input autoFocus value={filename} onChange={event => setFilename(event.target.value)} aria-label="目录名称" disabled={creating} /></label>{formError && <p className="form-error" role="alert">{formError}</p>}<div className="dialog-buttons"><button type="button" className="secondary-button" disabled={creating} onClick={closeModal}>取消</button><button className="primary-button" disabled={creating}>{creating ? '正在创建…' : '创建目录'}</button></div></form>}
       {modal.type === 'delete' && <><p className="dialog-copy">将先保存当前编辑，再把这篇笔记移到系统回收站。需要时可从回收站恢复。</p><p className="delete-path">{modal.notePath}</p>{formError && <p className="form-error" role="alert">{formError}</p>}<div className="dialog-buttons"><button className="secondary-button" disabled={creating} onClick={closeModal}>取消</button><button className="danger-button" disabled={creating} onClick={deleteNote}>{creating ? '正在删除…' : '移到回收站'}</button></div></>}
       {modal.type === 'rename' && <form onSubmit={event => { event.preventDefault(); void renameWork(); }}><p className="dialog-copy">重命名后，目录中的笔记会跟随新路径。</p><label className="form-label">{modal.kind === 'file' ? '笔记名称' : '目录名称'}<input autoFocus value={filename} onChange={event => setFilename(event.target.value)} aria-label={modal.kind === 'file' ? '笔记名称' : '目录名称'} disabled={creating} /></label>{formError && <p className="form-error" role="alert">{formError}</p>}<div className="dialog-buttons"><button type="button" className="secondary-button" disabled={creating} onClick={closeModal}>取消</button><button className="primary-button" disabled={creating}>{creating ? '正在重命名…' : '重命名'}</button></div></form>}
+      {modal.type === 'move' && <><p className="dialog-copy">选择移动到笔记库内的目标目录。</p><p className="delete-path">{modal.path}</p><div className="move-dirs"><button className={'move-dir' + (moveTarget === '' ? ' current' : '')} onClick={() => setMoveTarget('')}><Icon name="home" /><span>库根目录</span></button>{directories.filter(d => d !== modal.path && !(modal.kind === 'directory' && d.startsWith(modal.path + '/'))).map(d => <button key={d} className={'move-dir' + (moveTarget === d ? ' current' : '')} onClick={() => setMoveTarget(d)}><Icon name="folder" /><span>{d}</span></button>)}{!directories.length && <p className="empty-label">还没有其它目录，可直接移动到库根目录。</p>}</div>{formError && <p className="form-error" role="alert">{formError}</p>}<div className="dialog-buttons"><button className="secondary-button" disabled={creating} onClick={closeModal}>取消</button><button className="primary-button" disabled={creating} onClick={() => void moveWork()}>{creating ? '正在移动…' : '移动到此处'}</button></div></>}
+      {modal.type === 'delete-directory' && <><p className="dialog-copy">整个目录及其内容将移入系统回收站，可从回收站恢复。其他笔记中指向其中内容的引用会保留原样。</p><p className="delete-path">{modal.path}</p><p className="dialog-copy">包含 {modal.count.notes} 篇笔记、{modal.count.attachments} 个附件。</p>{formError && <p className="form-error" role="alert">{formError}</p>}<div className="dialog-buttons"><button className="secondary-button" disabled={creating} onClick={closeModal}>取消</button><button className="danger-button" disabled={creating} onClick={() => void deleteDirectory()}>{creating ? '正在删除…' : '移到回收站'}</button></div></>}
       {modal.type === 'create' && <form onSubmit={event => void create(event)}><p className="dialog-copy">文件将保存在当前笔记库中。可以指定已有目录中的相对路径。</p><label className="form-label">笔记名称<input autoFocus value={filename} onChange={event => setFilename(event.target.value)} aria-label="笔记名称" placeholder="未命名笔记.md" disabled={creating} /></label>{formError && <p className="form-error" role="alert">{formError}</p>}<div className="dialog-buttons"><button type="button" className="secondary-button" disabled={creating} onClick={closeModal}>取消</button><button className="primary-button" disabled={creating}>{creating ? '正在创建…' : '创建笔记'}</button></div></form>}
       {modal.type === 'conflict' && <><p className="dialog-copy">外部修改与当前编辑都需要保留。另存为副本会保留你的内容，并重新载入原文件的磁盘版本。</p><div className="conflict-versions"><section><strong>当前编辑内容</strong><pre>{sessions.current.get(modal.notePath)?.content}</pre></section><section><strong>磁盘上的内容</strong><pre>{modal.disk.content}</pre></section></div><div className="dialog-buttons"><button className="secondary-button" onClick={() => void useDisk(modal.notePath, modal.disk)}>使用磁盘版本</button><button className="primary-button" onClick={() => openCreate(sessions.current.get(modal.notePath)!.content, modal.notePath)}>保留我的内容为副本</button></div></>}
       {modal.type === 'recoveries' && <><p className="dialog-copy">这些编辑尚未保存。即使原笔记已经被删除，也可以把恢复内容保存为新笔记。</p>{recoveries.map(recovery => <button className="quick-row" key={recovery.path} onClick={() => { if (files.some(file => file.path === recovery.path)) { void openNote(recovery.path).then(() => setModal({ type: 'recovery', notePath: recovery.path, recovery })); } else openCreate(recovery.content, undefined, recovery.path); }}><Icon name="file" /><span>{nameOf(recovery.path)}<small>{recovery.path}</small></span></button>)}</>}

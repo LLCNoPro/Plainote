@@ -67,6 +67,19 @@ test('普通链接呈现文本，编辑时保留完整地址，不将图片误�
   assert.equal(all.some(r => r.kind === 'hide' && r.from > 26), false);
   assert.equal(previewRanges(s, new Set([1])).some(r => r.kind === 'hide' && r.from < 26), false);
 });
+test('空标签链接保留 URL 作为可见文本', () => {
+  const s = state('[](https://example.com)');
+  const all = previewRanges(s, new Set());
+  assert.ok(all.some(r => r.className === 'lp-link'));
+  assert.equal(all.some(r => r.kind === 'hide' && s.doc.sliceString(r.from, r.to) === 'https://example.com'), false);
+});
+test('标签形如 URL 时不被误隐藏，仅隐藏目标地址', () => {
+  const s = state('[www.baidu.com](百度)');
+  const all = previewRanges(s, new Set());
+  assert.ok(all.some(r => r.className === 'lp-link'));
+  assert.equal(all.some(r => r.kind === 'hide' && s.doc.sliceString(r.from, r.to) === 'www.baidu.com'), false);
+  assert.ok(all.some(r => r.kind === 'hide' && s.doc.sliceString(r.from, r.to) === '百度'));
+});
 test('GFM 表格可预览，进入任何表格行后整表恢复源码', () => {
   const s = EditorState.create({ doc: '| 名称 | 状态 |\n| --- | :---: |\n| 素记 | **完成** |', extensions: [markdown({ base: markdownLanguage })] });
   assert.ok(previewRanges(s, new Set()).some(r => r.kind === 'table'));

@@ -18,6 +18,8 @@
     "test:markdown": "node tests/markdown-desktop.cjs",
     "test:files": "node tests/file-management-desktop.cjs",
     "test:reading": "node tests/reading-desktop.cjs",
+    "test:attachments": "node tests/attachments-desktop.cjs",
+    "test:move": "node tests/move-desktop.cjs",
     "dist:win": "npm run build && electron-builder --win nsis zip --x64 --publish never"
   },
   "build": {

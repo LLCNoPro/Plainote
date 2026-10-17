@@ -8,7 +8,7 @@ const paths: Record<string, string> = {
   settings:'M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8',
   code:'M8 6l-6 6 6 6 M16 6l6 6-6 6 M14 3l-4 18', check:'M5 12l4 4L19 6',
   warning:'M12 3L2 21h20z M12 9v5 M12 17h.1', refresh:'M20 7v5h-5 M20 12a8 8 0 1 0-2 6',
-  trash:'M4 6h16 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7', 'folder-plus':'M3 6h7l2 2h9v12H3z M12 11v6 M9 14h6', home:'M3 11l9-8 9 8 M5 10v11h14V10 M10 21v-7h4v7', pencil:'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z', export:'M12 4v11 M7 10l5 5 5-5 M4 20h16',
+  trash:'M4 6h16 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7', 'folder-plus':'M3 6h7l2 2h9v12H3z M12 11v6 M9 14h6', home:'M3 11l9-8 9 8 M5 10v11h14V10 M10 21v-7h4v7', pencil:'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z', export:'M12 4v11 M7 10l5 5 5-5 M4 20h16', move:'M3 6h7l2 2h9v12H3z M12 10v6 M10 14l2 2 2-2', image:'M4 4h16v16H4z M4 16l5-5 4 4 3-3 4 4 M9 9h.1 M9 9v.1',
   minimize:'M5 12h14', maximize:'M5 5h14v14H5z',
 };
 export function Icon({ name }: { name: string }) { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name] || paths.file} /></svg>; }
