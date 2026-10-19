@@ -11,6 +11,7 @@ import type { Range } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
 import type { Completion, CompletionResult } from '@codemirror/autocomplete';
 import type { PlainoteBridge, ResolvedImage } from '../shared/types.ts';
+import { MermaidWidget } from './mermaid.ts';
 
 declare global { interface Window { plainote?: PlainoteBridge } }
 
@@ -62,7 +63,7 @@ export function fileCompletionSource(context: CompletionContext): CompletionResu
   return null;
 }
 
-export interface PreviewRange { kind: 'line' | 'hide' | 'mark' | 'task' | 'code-label' | 'rule' | 'bullet' | 'table' | 'image'; from: number; to: number; className?: string; text?: string; target?: string; attributes?: Record<string, string> }
+export interface PreviewRange { kind: 'line' | 'hide' | 'mark' | 'task' | 'code-label' | 'rule' | 'bullet' | 'table' | 'image' | 'mermaid'; from: number; to: number; className?: string; text?: string; target?: string; attributes?: Record<string, string> }
 export function extractHeadings(raw: string): { text: string; level: number; line: number }[] {
   const state = State.create({ doc: normalizeDocument(raw), extensions: [markdown({ base: markdownLanguage })] });
   return previewRanges(state, new Set()).filter(r => r.kind === 'line' && r.className?.startsWith('lp-heading-')).map(r => {
@@ -82,6 +83,11 @@ export function previewRanges(state: EditorState, activeLines: Set<number>): Pre
     if (node.name === 'Document') return;
     if (node.from < frontmatter || node.name === 'HTMLBlock') return false;
     if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
+      const info = node.node.getChild('CodeInfo');
+      if (node.name === 'FencedCode' && info && state.doc.sliceString(info.from, info.to).trim() === 'mermaid' && node.node.getChildren('CodeMark').length === 2 && !active(node.from, node.to)) {
+        result.push({ kind: 'mermaid', from: node.from, to: node.to, text: node.node.getChildren('CodeText').map(text => state.doc.sliceString(text.from, text.to)).join('') });
+        return false;
+      }
       const first = state.doc.lineAt(node.from).number, last = state.doc.lineAt(node.to).number;
       for (let number = first; number <= last; number++) {
         const line = state.doc.line(number);
@@ -180,7 +186,7 @@ const inlinePreview = ViewPlugin.fromClass(class {
       else if (range.kind === 'hide') decorations.push(Decoration.replace({}).range(range.from, range.to));
       else if (range.kind === 'mark') decorations.push(Decoration.mark({ class: range.className, attributes: range.attributes }).range(range.from, range.to));
       else if (range.kind === 'task') decorations.push(Decoration.replace({ widget: new TaskWidget(/x/i.test(view.state.doc.sliceString(range.from, range.to)), range.from, !view.state.facet(taskTogglePermission)) }).range(range.from, range.to));
-      else if (range.kind !== 'table' && range.kind !== 'image') decorations.push(Decoration.replace({ widget: new LabelWidget(range.kind, range.text || '') }).range(range.from, range.to));
+      else if (range.kind !== 'table' && range.kind !== 'image' && range.kind !== 'mermaid') decorations.push(Decoration.replace({ widget: new LabelWidget(range.kind, range.text || '') }).range(range.from, range.to));
     }
     return Decoration.set(decorations, true);
   }
@@ -303,7 +309,11 @@ function blockDecorations(state: EditorState, focused: boolean) {
   const assets = state.facet(noteAssetsFacet);
   const decorations: Range<Decoration>[] = [];
   for (const range of previewRanges(state, active)) {
-    if (range.kind === 'table') decorations.push(Decoration.replace({ block: true, widget: new TableWidget(state.doc.sliceString(range.from, range.to), range.from, findTable(state, range.from), state) }).range(range.from, range.to));
+    if (range.kind === 'mermaid') decorations.push(Decoration.replace({ block: true, widget: new MermaidWidget(range.text || '', range.from, (view, from) => {
+      view.focus();
+      view.dispatch({ effects: previewFocus.of(true), selection: { anchor: view.state.doc.lineAt(from).to + 1 }, scrollIntoView: true });
+    }, state.readOnly) }).range(range.from, range.to));
+    else if (range.kind === 'table') decorations.push(Decoration.replace({ block: true, widget: new TableWidget(state.doc.sliceString(range.from, range.to), range.from, findTable(state, range.from), state) }).range(range.from, range.to));
     else if (range.kind === 'image') decorations.push(Decoration.replace({ block: true, widget: new ImageWidget('image', range.target || '', range.text || '', assets) }).range(range.from, range.to));
   }
   for (const ref of findReferences(state.doc.toString())) {

@@ -5,6 +5,36 @@ import { EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { previewRanges, extractHeadings, tableCells, tableCellPosition } from '../src/renderer/preview.ts';
 const state = (doc: string) => EditorState.create({ doc, extensions: [markdown()] });
+test('Mermaid 完整围栏转换为块预览，任何一行进入编辑时恢复完整源码', () => {
+  for (const fence of ['```', '~~~']) {
+    const doc = `${fence}mermaid\nflowchart LR\n  A[开始] --> B[完成]\n${fence}`;
+    const s = state(doc);
+    const ranges = previewRanges(s, new Set());
+    const diagram = ranges.find(r => r.kind === 'mermaid');
+    assert.ok(diagram);
+    assert.equal(diagram.text, 'flowchart LR\n  A[开始] --> B[完成]');
+    assert.deepEqual([diagram.from, diagram.to], [0, doc.length]);
+    assert.equal(ranges.some(r => r.kind === 'code-label' || r.kind === 'hide'), false);
+    for (const line of [1, 2, 3, 4]) {
+      assert.equal(previewRanges(s, new Set([line])).some(r => r.kind === 'mermaid'), false);
+    }
+  }
+});
+test('未闭合 Mermaid 与普通代码块保留代码显示', () => {
+  for (const doc of ['```mermaid\nflowchart LR\nA --> B', '```js\nA --> B\n```', '```mermaid-extra\nA --> B\n```']) {
+    assert.equal(previewRanges(state(doc), new Set()).some(r => r.kind === 'mermaid'), false);
+  }
+});
+test('Mermaid 阅读模式即使光标在块中仍显示图表，空代码块也可恢复编辑', () => {
+  const s = EditorState.create({ doc: '```mermaid\n```', extensions: [markdown(), EditorState.readOnly.of(true)] });
+  assert.equal(previewRanges(s, new Set([1])).find(r => r.kind === 'mermaid')?.text, '');
+});
+test('引用中的 Mermaid 去除引用标记，图表内容中的 Markdown 不作格式处理', () => {
+  const s = state('> ```mermaid\n> flowchart LR\n> A[**原文**] --> B\n> ```');
+  const ranges = previewRanges(s, new Set());
+  assert.equal(ranges.find(r => r.kind === 'mermaid')?.text, 'flowchart LR\nA[**原文**] --> B');
+  assert.equal(ranges.some(r => r.className === 'lp-strong'), false);
+});
 test('非当前行呈现标题与强调，光标所在行保留源码标记', () => {
   const s = state('# 周会\n\n**重点**');
   const all = previewRanges(s, new Set());

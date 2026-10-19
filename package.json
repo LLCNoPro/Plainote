@@ -16,6 +16,7 @@
     "dist": "npm run build && electron-builder",
     "test:desktop": "node tests/electron-smoke.cjs",
     "test:markdown": "node tests/markdown-desktop.cjs",
+    "test:mermaid": "node tests/mermaid-desktop.cjs",
     "test:files": "node tests/file-management-desktop.cjs",
     "test:reading": "node tests/reading-desktop.cjs",
     "test:attachments": "node tests/attachments-desktop.cjs",
@@ -75,6 +76,7 @@
     "@lezer/highlight": "^1.2.5",
     "codemirror": "^6.0.2",
     "markdown-it": "^15.0.2",
+    "mermaid": "^12.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
