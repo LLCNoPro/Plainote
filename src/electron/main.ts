@@ -2,12 +2,13 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'elec
 import type { IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { VaultService, VaultError } from './vault.ts';
+import { exportDocxDocument } from './docx-export.ts';
+import { createMermaidExporter } from './mermaid-export.ts';
 import { readAiConfig, saveAiConfig, searchNotes, streamChat } from './ai.ts';
 import { readAttachmentConfig, saveAttachmentConfig, attachmentRelativeDir } from './attachments.ts';
 import { relocateWithReferences, resolveImages, resolveLinkTarget, resolveTarget } from './maintenance.ts';
@@ -150,19 +151,10 @@ register('move', async (relative: unknown, targetDir: unknown) => {
 });
 register('trash-directory', (relative: string) => { if (typeof relative !== 'string') throw new VaultError('INVALID_PATH', '目录路径无效。'); return requireVault().trashDirectory(relative, filename => shell.trashItem(filename)); });
 
-function runPandoc(cmd: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args);
-    let stderr = '';
-    proc.stderr.on('data', chunk => { stderr += chunk; });
-    proc.on('error', error => reject(new VaultError('IO', '无法运行 Pandoc：' + error.message)));
-    proc.on('close', code => { if (code === 0) resolve(); else reject(new VaultError('IO', 'Pandoc 转换失败：' + (stderr.trim() || '未知错误'))); });
-  });
-}
 function pandocAvailable(cmd: string): Promise<boolean> {
   return new Promise(resolve => {
     let stdout = '';
-    const proc = spawn(cmd, ['--version']);
+    const proc = spawn(cmd, ['--version'], { windowsHide: true });
     proc.stdout.on('data', chunk => { stdout += chunk; });
     proc.on('error', () => resolve(false));
     const timer = setTimeout(() => { proc.kill(); resolve(false); }, 8000);
@@ -170,23 +162,23 @@ function pandocAvailable(cmd: string): Promise<boolean> {
   });
 }
 async function exportDocx(content: string, sourcePath: string, pandocPath: string): Promise<string | null> {
+  const sourceVault = requireVault();
+  const relativeDirectory = path.dirname(sourcePath);
+  const sourceDirectory = await sourceVault.directoryPath(relativeDirectory === '.' ? '' : relativeDirectory);
   const cmd = pandocPath.trim() || 'pandoc';
   if (!await pandocAvailable(cmd)) throw new VaultError('PANDOC_NOT_FOUND', '未找到 Pandoc，请在设置中配置 pandoc 路径。');
   const defaultName = (path.basename(sourcePath || '笔记') || '笔记').replace(/\.md$/i, '') + '.docx';
   const result = await dialog.showSaveDialog(window!, { title: '导出 DOCX', defaultPath: defaultName, filters: [{ name: 'Word 文档', extensions: ['docx'] }] });
   if (result.canceled || !result.filePath) return null;
-  const temporary = path.join(tmpdir(), 'plainote-' + randomUUID() + '.md');
-  await writeFile(temporary, content, 'utf8');
-  const reference = resolveTemplate('reference.docx');
-  const args = [temporary];
-  if (reference) args.push('--reference-doc', reference);
-  args.push('-o', result.filePath);
-  try { await runPandoc(cmd, args); }
-  finally { await rm(temporary, { force: true }); }
+  const diagrams = createMermaidExporter();
+  try {
+    await exportDocxDocument({ cmd, content, destination: result.filePath, reference: resolveTemplate('reference.docx'), resourcePaths: [sourceDirectory, sourceVault.root], render: diagrams.render });
+  } finally { diagrams.dispose(); }
   return result.filePath;
 }
 register('export-docx', (content: string, sourcePath: string, pandocPath: string) => {
   if (typeof content !== 'string' || typeof sourcePath !== 'string' || typeof pandocPath !== 'string') throw new VaultError('INVALID_PATH', '导出参数无效。');
+  contentArgs(sourcePath, content);
   return exportDocx(content, sourcePath, pandocPath);
 });
 register('ai-get-config', () => readAiConfig(userFile()));

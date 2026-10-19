@@ -17,7 +17,7 @@
 - **可靠保存**：自动保存，保存前写恢复副本；外部修改检测、版本冲突比较、另存副本；异常退出后可恢复未保存内容。
 - **原文保真**：BOM、未编辑部分的换行、YAML 与未知 Markdown 语法原样保留。
 - **外观**：浅色/深色主题 + 8 种主题色（青绿/砖红/靛蓝/琥珀/玫瑰/松绿/黛紫/墨蓝）、正文字号、侧栏收起、右侧面板拖动调宽、系统窗口操作。
-- **导出 DOCX**：用 Pandoc 把笔记导出为 Word 文档。
+- **导出 DOCX**：用 Pandoc 把笔记导出为 Word 文档；Mermaid 代码块自动转成浅色高清 PNG 嵌入文档，并按页面尺寸缩放。
 - **AI 对话**：右侧面板把整个笔记库当作一个项目来回答（对接 DeepSeek / OpenAI 兼容服务）。
 
 ## 界面截图
@@ -55,7 +55,7 @@ flowchart LR
 ```
 ````
 
-Mermaid 当前支持笔记正文预览；AI 回复、附件预览和 DOCX 导出暂未接入图表渲染。
+Mermaid 支持笔记正文预览与 DOCX 图片导出；AI 回复和附件预览暂未接入图表渲染。点击「导出 DOCX」即可自动转换，无需额外安装 Mermaid CLI。图表语法错误时会提示图表序号并停止导出，保留已有目标文件和笔记原文。
 
 ## 开发
 
@@ -104,6 +104,7 @@ npm test            # 单元测试
 npm run test:desktop  # 桌面保存/冲突/恢复回归
 npm run test:markdown # Markdown 预览桌面验证
 npm run test:mermaid  # Mermaid 渲染与源码编辑桌面验证
+npm run test:docx     # Mermaid 图片嵌入 Word 的导出验证（需要 Pandoc 与 Python 3）
 npm run test:files    # 文件管理桌面验证
 npm run test:reading  # 阅读模式桌面验证
 npm run test:attachments # 图片附件与导入桌面验证
@@ -117,6 +118,7 @@ npm run test:move       # 移动/删除目录与引用维护桌面验证
 | `npm run test:desktop` | Electron 集成测试：真实 Markdown 读写、保存、冲突、取消退出、异常退出恢复。 |
 | `npm run test:markdown` | 代码块/表格/链接/引用等即时预览的桌面验证。 |
 | `npm run test:mermaid` | Mermaid 离线渲染、主题、错误恢复、源码编辑和宽图滚动。 |
+| `npm run test:docx` | 实际 Pandoc 导出、图表 PNG 嵌入及页面尺寸、相对图片资源、失败保护与清理。测试需安装 Pandoc 和 Python 3，可通过 `PLAINOTE_TEST_PANDOC` 指定 Pandoc。 |
 | `npm run test:files` | 新建目录、删除笔记、回收站等文件管理桌面验证。 |
 | `npm run test:reading` | 阅读模式的只读、待办勾选、模式切换桌面验证。 |
 | `npm run test:attachments` | 图片语法预览/放大/缺失占位、粘贴拖入导入、附件位置配置、点击打开附件。 |
