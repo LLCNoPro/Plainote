@@ -57,6 +57,18 @@ test('YAML 属性保持源码，不被当作正文标题或强调处理', () => 
 test('大纲只提取正文标题，不包含代码块或属性中的伪标题', () => {
   assert.deepEqual(extractHeadings('---\nalias: **literal**\n---\n# Real\n\n```sh\n# wrong\n```').map(h => h.text), ['Real']);
 });
+test('长文档大纲提取全部标题，包含远离首屏的末尾标题', () => {
+  const sections = Array.from({ length: 100 }, (_, i) => `## 第 ${i + 1} 节\n\n${'这是正文。'.repeat(200)}\n\n`);
+  const headings = extractHeadings(sections.join(''));
+  assert.equal(headings.length, 100);
+  assert.deepEqual(headings.at(-1), { text: '第 100 节', level: 2, line: 397 });
+});
+test('长文档后半部分的代码伪标题被忽略，Setext 和新增标题仍完整提取', () => {
+  const prefix = '# 开始\n\n' + '正文内容\n\n'.repeat(3000);
+  const source = prefix + '```md\n# 代码伪标题\n```\n\n末尾章节\n===\n\n## 后续章节';
+  assert.deepEqual(extractHeadings(source).map(h => h.text), ['开始', '末尾章节', '后续章节']);
+  assert.deepEqual(extractHeadings(source + '\n\n### 新增标题').map(h => h.text), ['开始', '末尾章节', '后续章节', '新增标题']);
+});
 test('反引号与波浪线代码块有完整背景和语言标签，编辑时显示围栏', () => {
   for (const fence of ['```', '~~~']) {
     const s = state(`${fence}js\nconst text = "**literal**";\n${fence}`);

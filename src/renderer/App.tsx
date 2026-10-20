@@ -6,7 +6,8 @@ import { SaveSession } from '../shared/save-session.ts';
 import { CloseAttempt } from '../shared/close-attempt.ts';
 import { flushSessions } from '../shared/flush-sessions.ts';
 import type { EditorMode } from '../shared/editor-mode.ts';
-import { extractHeadings, type NoteAssets } from './preview.ts';
+import type { NoteAssets } from './preview.ts';
+import { useOutline } from './useOutline.ts';
 import { THEMES } from './themes.ts';
 import { AiPanel } from './AiPanel.tsx';
 import { AttachmentPreview } from './AttachmentPreview.tsx';
@@ -41,6 +42,12 @@ function FileTree({ files, directories, selectedDirectory, active, open, remove,
   return render('', 0);
 }
 
+type PanelSide = 'left' | 'right';
+const readPanelWidth = (side: PanelSide, fallback: number) => {
+  const stored = Number(localStorage.getItem(`plainote-${side}-width`));
+  return Number.isFinite(stored) && stored > 0 ? Math.max(220, Math.min(560, stored)) : fallback;
+};
+
 export function App() {
   const bridge = window.plainote;
   const [vault, setVault] = useState<VaultInfo | null>(null), [files, setFiles] = useState<NoteFile[]>([]), [active, setActive] = useState('');
@@ -50,7 +57,10 @@ export function App() {
   const [pandocPath, setPandocPath] = useState(() => localStorage.getItem('plainote-pandoc') || '');
   const [inspectorTab, setInspectorTab] = useState<'outline' | 'ai'>('outline');
   const [aiConfig, setAiConfig] = useState<AiConfig>({ baseUrl: 'https://api.deepseek.com/anthropic', apiKey: '', model: 'deepseek-chat', protocol: 'anthropic' });
-  const [rightWidth, setRightWidth] = useState(() => Number(localStorage.getItem('plainote-right-width')) || 280);
+  const [leftWidth, setLeftWidth] = useState(() => readPanelWidth('left', 238));
+  const [rightWidth, setRightWidth] = useState(() => readPanelWidth('right', 280));
+  const [resizing, setResizing] = useState<PanelSide | null>(null);
+  const resizeCleanup = useRef<(() => void) | null>(null);
   const pendingInsert = useRef<string | null>(null);
   const [left, setLeft] = useState(true), [right, setRight] = useState(() => innerWidth > 1050), [query, setQuery] = useState('');
   const [modal, setModal] = useState<ModalState | null>(null), [quick, setQuick] = useState(''), [quickIndex, setQuickIndex] = useState(0);
@@ -377,16 +387,42 @@ export function App() {
     if (outcome.unchanged.length) explain(outcome.unchanged.length + ' 处引用无法解析，已保留原文。');
   };
   const updateAi = (patch: Partial<AiConfig>) => { const next = { ...aiConfig, ...patch }; setAiConfig(next); void bridge?.aiSetConfig(next); };
-  const startResize = (event: React.MouseEvent) => {
+  const panelMaximum = (side: PanelSide) => Math.max(220, Math.min(560, innerWidth - (side === 'left' ? right ? rightWidth : 0 : left ? leftWidth : 0) - 360));
+  const changePanelWidth = (side: PanelSide, width: number) => (side === 'left' ? setLeftWidth : setRightWidth)(Math.max(220, Math.min(panelMaximum(side), width)));
+  const resizeWithKey = (side: PanelSide, event: React.KeyboardEvent) => {
+    const width = side === 'left' ? leftWidth : rightWidth;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const startX = event.clientX, startWidth = rightWidth;
-    const onMove = (e: MouseEvent) => setRightWidth(Math.max(220, Math.min(560, startWidth - (e.clientX - startX))));
-    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); document.body.style.cursor = ''; document.body.style.userSelect = ''; };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
+    const delta = (event.key === 'ArrowRight' ? 16 : -16) * (side === 'left' ? 1 : -1);
+    changePanelWidth(side, event.key === 'Home' ? 220 : event.key === 'End' ? panelMaximum(side) : width + delta);
   };
+  const startResize = (side: PanelSide, event: React.MouseEvent) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    resizeCleanup.current?.();
+    const startX = event.clientX, startWidth = side === 'left' ? leftWidth : rightWidth;
+    const previousCursor = document.body.style.cursor, previousSelection = document.body.style.userSelect;
+    const onMove = (e: MouseEvent) => changePanelWidth(side, startWidth + (e.clientX - startX) * (side === 'left' ? 1 : -1));
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); window.removeEventListener('blur', onUp);
+      document.body.style.cursor = previousCursor; document.body.style.userSelect = previousSelection;
+      resizeCleanup.current = null; setResizing(null);
+    };
+    resizeCleanup.current = onUp;
+    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); window.addEventListener('blur', onUp);
+    document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; setResizing(side);
+  };
+  useEffect(() => () => resizeCleanup.current?.(), []);
+  useEffect(() => {
+    const fitPanels = () => {
+      if (left && right && leftWidth + rightWidth > innerWidth - 360) {
+        const maximum = Math.max(220, (innerWidth - 360) / 2);
+        setLeftWidth(width => Math.min(width, maximum)); setRightWidth(width => Math.min(width, maximum));
+      }
+    };
+    fitPanels(); window.addEventListener('resize', fitPanels);
+    return () => window.removeEventListener('resize', fitPanels);
+  }, [left, right, leftWidth, rightWidth]);
   const compare = async () => {
     if (!bridge || !activeSession || transition.current) return;
     const result = await bridge.read(activeSession.path);
@@ -424,6 +460,7 @@ export function App() {
     for (const [key, value] of Object.entries(colors)) document.documentElement.style.setProperty('--' + key, value);
   }, [theme, accent]);
   useEffect(() => { if (bridge) void bridge.aiGetConfig().then(r => { if (r.ok) setAiConfig(r.value); }); }, [bridge]);
+  useEffect(() => { document.documentElement.style.setProperty('--left-width', leftWidth + 'px'); localStorage.setItem('plainote-left-width', String(leftWidth)); }, [leftWidth]);
   useEffect(() => { document.documentElement.style.setProperty('--right-width', rightWidth + 'px'); localStorage.setItem('plainote-right-width', String(rightWidth)); }, [rightWidth]);
   useEffect(() => { if (mode !== 'read' && pendingInsert.current !== null) { const t = pendingInsert.current; pendingInsert.current = null; applyInsert(t); } }, [mode]);
   useEffect(() => {
@@ -502,7 +539,7 @@ export function App() {
   };
   const noteAssets = useMemo<NoteAssets | null>(() => active ? { notePath: active, images, openNote: navigateToNote, previewAttachment } : null, [active, images, navigateToNote, previewAttachment]);
   const filePaths = useMemo(() => files.map(f => f.path), [files]);
-  const headings = useMemo(() => activePreview != null ? [] : extractHeadings(activeSession?.content || ''), [activeSession?.content, activePreview]);
+  const { headings, loading: outlineLoading, error: outlineError } = useOutline(activePreview === null && activeSession ? activeSession.path : null, activeSession?.content || '');
   const filtered = files.filter(file => (file.name + file.path).toLowerCase().includes(query.toLowerCase()));
   const quickMatches = files.filter(file => (file.name + file.path).toLowerCase().includes(quick.toLowerCase())).slice(0, 50);
   const selectedQuick = Math.min(quickIndex, Math.max(0, quickMatches.length - 1));
@@ -512,10 +549,10 @@ export function App() {
   return <div className={'app' + (!left ? ' hide-left' : '') + (!right ? ' hide-right' : '') + (bridge?.platform === 'win32' ? ' windows' : '')} aria-busy={busy}>
     <header className="titlebar"><div className="traffic-space" /><span className="window-title">素记 <span>Plainote</span></span><div className="title-actions"><button className="icon-button" title="显示或隐藏目录" aria-label="显示或隐藏目录" aria-expanded={left} onClick={() => setLeft(!left)}><Icon name="panel-left" /></button><button className="icon-button" title="显示或隐藏大纲" aria-label="显示或隐藏大纲" aria-expanded={right} onClick={() => setRight(!right)}><Icon name="panel-right" /></button>{bridge?.platform === 'win32' && <div className="window-buttons"><button aria-label="最小化" onClick={() => bridge.minimize()}><Icon name="minimize" /></button><button aria-label="最大化或还原" onClick={() => bridge.toggleMaximize()}><Icon name="maximize" /></button><button aria-label="关闭窗口" onClick={() => bridge.closeWindow()}><Icon name="close" /></button></div>}</div></header>
     <div className="workspace" inert={busy}>
-      <aside className="sidebar" aria-label="笔记目录"><button className="vault-button" disabled={busy || !bridge} onClick={() => void chooseVault()} title={vault?.root || '打开笔记文件夹'}><span className="brand-mark"><Icon name="book" /></span><span><strong>{vault?.name || '打开笔记库'}</strong><small>{vault ? '本地笔记' : '选择一个文件夹'}</small></span><Icon name="chevrons" /></button><label className="search-field"><Icon name="search" /><input aria-label="查找笔记名称" placeholder="查找笔记名称" value={query} onChange={event => setQuery(event.target.value)} /></label><button className="new-note" disabled={!vault || busy} onClick={() => openCreate()}><Icon name="plus" />新建笔记<kbd>{command} N</kbd></button><div className="section-label">文件 <span className="directory-tools"><button className="icon-button" aria-label="新建目录" title="新建目录" disabled={!vault || busy || creating} onClick={openDirectory}><Icon name="folder-plus" /></button><button className="icon-button" title="刷新目录" aria-label="刷新目录" disabled={!vault} onClick={() => void refreshFiles()}><Icon name="refresh" /></button></span></div><div className="files-pane">{busy ? <p className="empty-label">正在处理文件…</p> : query ? <>{filtered.map(file => <FileRow key={file.path} file={file} active={active} open={openFile} remove={p => void requestDelete(p)} rename={p => requestRename('file', p)} move={p => requestMove('file', p)} />)}{!filtered.length && <p className="empty-label">没有匹配的笔记，试试其他名称。</p>}</> : <FileTree files={files} directories={directories} selectedDirectory={selectedDirectory} active={active} open={openFile} remove={p => void requestDelete(p)} rename={requestRename} move={requestMove} removeDirectory={p => void requestDeleteDirectory(p)} drop={dropMove} chooseDirectory={setSelectedDirectory} />}{vault && !files.length && !directories.length && !busy && <p className="empty-label">这里还没有 Markdown 笔记。<br />新建一篇，开始记录。</p>}</div>{recoveries.length > 0 && <button className="recovery-button" onClick={() => setModal({ type: 'recoveries' })}>恢复未保存内容 ({recoveries.length})</button>}<footer className="sidebar-footer"><button className="icon-button" aria-label="设置" title="设置" onClick={() => setModal({ type: 'settings' })}><Icon name="settings" /></button><button className="theme-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}><Icon name={theme === 'dark' ? 'sun' : 'moon'} />{theme === 'dark' ? '浅色模式' : '深色模式'}</button></footer></aside>
+      <aside id="note-sidebar" className="sidebar" aria-label="笔记目录"><div className={"resize-handle resize-handle-left" + (resizing === "left" ? " is-resizing" : "")} role="separator" aria-label="调整目录面板宽度" aria-orientation="vertical" aria-controls="note-sidebar" aria-valuemin={220} aria-valuemax={panelMaximum("left")} aria-valuenow={leftWidth} tabIndex={0} onMouseDown={event => startResize("left", event)} onKeyDown={event => resizeWithKey("left", event)} /><button className="vault-button" disabled={busy || !bridge} onClick={() => void chooseVault()} title={vault?.root || '打开笔记文件夹'}><span className="brand-mark"><Icon name="book" /></span><span><strong>{vault?.name || '打开笔记库'}</strong><small>{vault ? '本地笔记' : '选择一个文件夹'}</small></span><Icon name="chevrons" /></button><label className="search-field"><Icon name="search" /><input aria-label="查找笔记名称" placeholder="查找笔记名称" value={query} onChange={event => setQuery(event.target.value)} /></label><button className="new-note" disabled={!vault || busy} onClick={() => openCreate()}><Icon name="plus" />新建笔记<kbd>{command} N</kbd></button><div className="section-label">文件 <span className="directory-tools"><button className="icon-button" aria-label="新建目录" title="新建目录" disabled={!vault || busy || creating} onClick={openDirectory}><Icon name="folder-plus" /></button><button className="icon-button" title="刷新目录" aria-label="刷新目录" disabled={!vault} onClick={() => void refreshFiles()}><Icon name="refresh" /></button></span></div><div className="files-pane">{busy ? <p className="empty-label">正在处理文件…</p> : query ? <>{filtered.map(file => <FileRow key={file.path} file={file} active={active} open={openFile} remove={p => void requestDelete(p)} rename={p => requestRename('file', p)} move={p => requestMove('file', p)} />)}{!filtered.length && <p className="empty-label">没有匹配的笔记，试试其他名称。</p>}</> : <FileTree files={files} directories={directories} selectedDirectory={selectedDirectory} active={active} open={openFile} remove={p => void requestDelete(p)} rename={requestRename} move={requestMove} removeDirectory={p => void requestDeleteDirectory(p)} drop={dropMove} chooseDirectory={setSelectedDirectory} />}{vault && !files.length && !directories.length && !busy && <p className="empty-label">这里还没有 Markdown 笔记。<br />新建一篇，开始记录。</p>}</div>{recoveries.length > 0 && <button className="recovery-button" onClick={() => setModal({ type: 'recoveries' })}>恢复未保存内容 ({recoveries.length})</button>}<footer className="sidebar-footer"><button className="icon-button" aria-label="设置" title="设置" onClick={() => setModal({ type: 'settings' })}><Icon name="settings" /></button><button className="theme-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}><Icon name={theme === 'dark' ? 'sun' : 'moon'} />{theme === 'dark' ? '浅色模式' : '深色模式'}</button></footer></aside>
       <main className="editor-area"><div className="tabs" role="tablist" aria-label="已打开笔记">{[...sessions.current.values()].map(session => <div key={session.path} className={'tab' + (active === session.path && activePreview === null ? ' active' : '')}><button className="tab-select" role="tab" aria-selected={active === session.path && activePreview === null} title={session.path} onClick={() => select(session.path)}><Icon name={session.status === 'error' || session.status === 'conflict' ? 'warning' : 'file'} /><span>{nameOf(session.path)}</span>{session.content !== session.savedContent && <span className="dirty-dot" aria-label="未保存" />}</button><button className="tab-close" aria-label={'关闭 ' + nameOf(session.path)} onClick={() => void closeTab(session.path)}><Icon name="close" /></button></div>)}{previewTabs.map(p => <div key={'p:' + p} className={'tab preview-tab' + (activePreview === p ? ' active' : '')}><button className="tab-select" role="tab" aria-selected={activePreview === p} title={p} onClick={() => setActivePreview(p)}><Icon name={isImagePath(p) ? 'image' : 'file'} /><span>{basenameOf(p)}</span></button><button className="tab-close" aria-label={'关闭 ' + basenameOf(p)} onClick={() => closePreview(p)}><Icon name="close" /></button></div>)}{vault && <button className="tab-add" aria-label="新建笔记" onClick={() => openCreate()}><Icon name="plus" /></button>}</div>
         {activePreview != null ? <AttachmentPreview path={activePreview} onClose={() => closePreview(activePreview)} /> : activeSession ? <><div className="editor-toolbar"><div className="breadcrumb" title={active}>{active.split('/').map((part, i) => <span key={i}>{i > 0 && <Icon name="chevron" />}{part.replace(/\.md$/i, '')}</span>)}</div><div className="editor-actions"><div className="editor-modes" role="group" aria-label="正文显示模式"><button className="mode-button" aria-pressed={mode === 'live'} onClick={() => setMode('live')}>即时预览</button><button className="mode-button" aria-pressed={mode === 'source'} onClick={() => setMode('source')}><Icon name="code" />源码</button><button className="mode-button" aria-pressed={mode === 'read'} onClick={() => setMode('read')}><Icon name="book" />阅读模式</button></div><button className="icon-button" aria-label="删除当前笔记" title="删除当前笔记" onClick={() => void requestDelete(active)}><Icon name="trash" /></button><button className="icon-button" aria-label="导出 DOCX" title="导出 DOCX" onClick={() => void exportNote()}><Icon name="export" /></button></div></div>{(activeSession.error || message) && <div className={'notice' + (activeSession.error ? ' error' : '')} role="status"><Icon name={activeSession.error || messageKind === 'error' ? 'warning' : 'check'} /><p>{activeSession.error?.message || message}</p>{activeSession.status === 'conflict' ? <button onClick={() => void compare()}>比较版本</button> : activeSession.error ? <button onClick={() => void activeSession.flush()}>重试保存</button> : <button aria-label="关闭提示" onClick={() => setMessage('')}><Icon name="close" /></button>}{activeSession.error && <button onClick={() => openCreate(activeSession.content, activeSession.path)}>另存为副本</button>}</div>}<Editor path={active} content={activeSession.content} mode={mode} readOnly={busy} noteAssets={noteAssets} filePaths={filePaths} onChange={edit} onImportFiles={importFiles} onReady={view => { editor.current = view; }} /></> : <section className="welcome"><span className="welcome-mark"><Icon name="book" /></span><h1>{vault ? '从一篇笔记开始。' : '让笔记回到你手中。'}</h1><p>{vault ? '新建笔记，或从左侧目录打开已有内容。' : '打开本地文件夹，继续使用你的 Markdown 笔记。'}</p><button className="primary-button" disabled={busy || !bridge} onClick={() => vault ? openCreate() : void chooseVault()}>{busy ? '正在加载…' : vault ? '新建笔记' : '打开笔记文件夹'}</button><small>{bridge ? '笔记直接保存在本地，无需导入转换。' : '请通过 npm run dev 启动桌面应用以访问本地文件。'}</small>{message && <p className="welcome-error" role="status">{message}</p>}</section>}</main>
-      <aside className="inspector" aria-label="笔记侧栏"><div className="resize-handle" onMouseDown={startResize} aria-hidden="true" /><div className="inspector-tabs"><button className={'inspector-tab' + (inspectorTab === 'outline' ? ' active' : '')} aria-pressed={inspectorTab === 'outline'} onClick={() => setInspectorTab('outline')}>大纲</button><button className={'inspector-tab' + (inspectorTab === 'ai' ? ' active' : '')} aria-pressed={inspectorTab === 'ai'} onClick={() => setInspectorTab('ai')}>AI 对话</button></div>{inspectorTab === 'outline' ? <><nav className="outline" aria-label="当前笔记大纲">{headings.map((heading, index) => <button key={index} style={{ paddingLeft: 11 + Math.min(heading.level - 1, 3) * 10 }} onClick={() => { const view = editor.current; if (view && heading.line <= view.state.doc.lines) { const line = view.state.doc.line(heading.line); view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'start' }) }); view.focus(); } }}>{heading.text}</button>)}{!headings.length && <p className="empty-label">{activePreview != null ? '正在预览附件。' : '添加标题后，可以在这里浏览笔记结构。'}</p>}</nav><p className="inspector-tip">正文直接使用 Markdown。<br />需要精确编辑时，可切换源码模式。</p></> : bridge ? <AiPanel bridge={bridge} note={activePreview != null ? null : activeSession ? { path: activeSession.path, name: nameOf(activeSession.path), content: activeSession.content } : null} getSelection={getSelection} onInsert={insertText} onConfigMissing={() => setModal({ type: 'settings', prompt: '请先配置 AI API Key，再使用 AI 对话。' })} /> : <p className="empty-label">AI 对话需要在桌面应用中运行。</p>}</aside>
+      <aside id="note-inspector" className="inspector" aria-label="笔记侧栏"><div className={"resize-handle" + (resizing === "right" ? " is-resizing" : "")} role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-controls="note-inspector" aria-valuemin={220} aria-valuemax={panelMaximum("right")} aria-valuenow={rightWidth} tabIndex={0} onMouseDown={event => startResize("right", event)} onKeyDown={event => resizeWithKey("right", event)} /><div className="inspector-tabs"><button className={'inspector-tab' + (inspectorTab === 'outline' ? ' active' : '')} aria-pressed={inspectorTab === 'outline'} onClick={() => setInspectorTab('outline')}>大纲</button><button className={'inspector-tab' + (inspectorTab === 'ai' ? ' active' : '')} aria-pressed={inspectorTab === 'ai'} onClick={() => setInspectorTab('ai')}>AI 对话</button></div>{inspectorTab === 'outline' ? <><nav className="outline" aria-label="当前笔记大纲">{headings.map((heading, index) => <button key={index} style={{ paddingLeft: 11 + Math.min(heading.level - 1, 3) * 10 }} onClick={() => { const view = editor.current; if (view && heading.line <= view.state.doc.lines) { const line = view.state.doc.line(heading.line); view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'start' }) }); view.focus(); } }}>{heading.text}</button>)}{!headings.length && <p className="empty-label">{activePreview != null ? '正在预览附件。' : outlineLoading ? '正在生成大纲…' : outlineError || '添加标题后，可以在这里浏览笔记结构。'}</p>}</nav><p className="inspector-tip">正文直接使用 Markdown。<br />需要精确编辑时，可切换源码模式。</p></> : bridge ? <AiPanel bridge={bridge} note={activePreview != null ? null : activeSession ? { path: activeSession.path, name: nameOf(activeSession.path), content: activeSession.content } : null} getSelection={getSelection} onInsert={insertText} onConfigMissing={() => setModal({ type: 'settings', prompt: '请先配置 AI API Key，再使用 AI 对话。' })} /> : <p className="empty-label">AI 对话需要在桌面应用中运行。</p>}</aside>
     </div>
     <footer className="statusbar"><span className={'save-status' + (activeSession?.error ? ' failed' : '')}>{activePreview != null ? <><Icon name="file" />预览 · {basenameOf(activePreview)}</> : <><Icon name={activeSession?.error ? 'warning' : 'check'} />{activeSession ? statuses[activeSession.status] : '本地笔记'}{dirty.length > 1 && ` · ${dirty.length} 篇待保存`}</>}</span><span className="vault-path" title={vault?.root}>{vault?.root}</span><div>{activePreview != null ? <span>附件预览</span> : <><span>{activeSession ? `${activeSession.content.replace(/\s/g, '').length} 字` : `${files.length} 篇笔记`}</span>{activeSession && <span>{mode === 'source' ? '源码模式' : mode === 'read' ? '阅读模式 · 正文只读' : '即时预览'}</span>}</>}</div></footer>
     {modal && <Modal title={modal.type === 'quick' ? '快速打开笔记' : modal.type === 'settings' ? '设置' : modal.type === 'create' ? '新建笔记' : modal.type === 'conflict' ? '这篇笔记有两个版本' : modal.type === 'directory' ? '新建目录' : modal.type === 'delete' ? '删除笔记' : modal.type === 'rename' ? (modal.kind === 'file' ? '重命名笔记' : '重命名目录') : modal.type === 'move' ? (modal.kind === 'file' ? '移动笔记' : '移动目录') : modal.type === 'delete-directory' ? '删除目录' : modal.type === 'recoveries' ? '恢复未保存内容' : '发现未保存的恢复内容'} close={closeModal}><fieldset className="modal-controls" disabled={busy}>

@@ -23,3 +23,9 @@ Mermaid 动态导入并本地打包。渲染使用 strict 安全级别，以 SVG
 用户提供的完整熔断器 `stateDiagram-v2` 原文位于 `tests/fixtures/mermaid-circuit-breaker.md`。Mermaid 能成功解析，但生成的 SVG 标签含 HTML `<br>`；原先通过 XML DOMParser 读取会出现 br/p 标签不匹配，把解析错误文档交给图片导致空白，未触发原有异常提示。
 
 改为在不挂载的 template 中解析 Mermaid strict 模式输出，再用 XMLSerializer 输出合法 SVG/XML，保留 HTML 换行且不修改笔记原文。图片展示前等待 decode，解码失败也进入可编辑的错误提示。已验证原文在深浅模式显示完整状态图，92 项单元测试、正式构建与新增后的 10 项 Mermaid 桌面检查通过，无页面异常或外部 HTTP 请求。截图：`state-light.png`、`state-dark.png`。
+
+## 宽图横向滚动背景修复（2026-10-20）
+
+超宽图表横向滚动时背景丢失：原背景容器只有可视宽度（复现 678px），图片却达到 3496px，溢出区域没有背景。背景容器增加 `width: fit-content` 与 `min-width: 100%`，宽图按完整图片及左右留白扩展，小图仍填满视口并居中；不增加块外边距，不改变 CodeMirror 高度测量。
+
+先补背景覆盖断言复现失败，再修复。浅深主题的左端、中间、右端均检查背景包含完整图片与留白，并确认小图居中和错误提示换行。10 项 Mermaid 桌面场景、99 项单元测试及构建通过，无页面异常或外部 HTTP 请求。六张滚动截图为 `.impeccable/review/mermaid/wide-{light,dark}-{start,middle,end}.png`。未修改原有设计系统的颜色、字体或圆角。

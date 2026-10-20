@@ -31,6 +31,8 @@ async function eventually(fn) { let last; for(let i=0;i<100;i++){try{return awai
   const svg = () => page.locator('.lp-mermaid-content img').first().getAttribute('src');
   const light = await svg();
   assert.ok(await page.locator('.lp-mermaid-content img').first().evaluate(img=>img.width<=img.naturalWidth+1), '图表不能被自动放大');
+  assert.ok(await diagrams.first().evaluate(e=>{const content=e.querySelector('.lp-mermaid-content').getBoundingClientRect(),img=e.querySelector('img').getBoundingClientRect();return Math.abs((content.left+content.right)-(img.left+img.right))<2;}),'小图应保持居中');
+  assert.ok(await page.locator('.lp-mermaid-error').evaluate(e=>{const content=e.parentElement,outer=content.parentElement;return content.getBoundingClientRect().width<=outer.clientWidth+1;}),'错误提示应继续在可视宽度内换行');
   assert.ok(decodeURIComponent(light).includes('开始'));
   assert.equal(await fs.readFile(file,'utf8'),source);
   await page.screenshot({path:path.join(output,'light.png')});
@@ -76,8 +78,23 @@ async function eventually(fn) { let last; for(let i=0;i<100;i++){try{return awai
   await page.getByRole('button',{name:'宽图',exact:true}).first().click();
   await page.locator('.lp-mermaid-content img').waitFor();
   await eventually(async()=>assert.ok(await diagrams.first().evaluate(e=>e.scrollWidth>e.clientWidth)));
-  await diagrams.first().evaluate(e=>{e.scrollLeft=100;});
-  assert.ok(await diagrams.first().evaluate(e=>e.scrollLeft>0));
+  for (const theme of ['light','dark']) {
+    if (await page.evaluate(()=>document.documentElement.dataset.theme)!==theme) await page.locator('.theme-button').click();
+    await eventually(async()=>assert.equal(await diagrams.first().getAttribute('aria-busy'),null));
+    await eventually(async()=>assert.ok(await diagrams.first().locator('img').evaluate(img=>img.complete&&img.naturalWidth>0)));
+    for (const position of ['start','middle','end']) {
+      await diagrams.first().evaluate((e,position)=>{e.scrollLeft=position==='start'?0:position==='end'?e.scrollWidth:(e.scrollWidth-e.clientWidth)/2;},position);
+      const coverage=await diagrams.first().evaluate(e=>{
+        const content=e.querySelector('.lp-mermaid-content'),image=content.querySelector('img'),style=getComputedStyle(content);
+        return {box:content.getBoundingClientRect().width,image:image.getBoundingClientRect().width,padding:parseFloat(style.paddingLeft)+parseFloat(style.paddingRight),scroll:e.scrollLeft};
+      });
+      assert.ok(coverage.box>=coverage.image+coverage.padding-1,`${theme}/${position}: 图表背景必须覆盖完整图片及留白 ${JSON.stringify(coverage)}`);
+      await diagrams.first().screenshot({path:path.join(output,`wide-${theme}-${position}.png`)});
+    }
+  }
+
+  await page.locator('.theme-button').click();
+  await eventually(async()=>assert.equal(await diagrams.first().getAttribute('aria-busy'),null));
   const previousDiagram = await diagrams.locator('img').getAttribute('src');
   await page.getByRole('button',{name:'状态图',exact:true}).first().click();
   await eventually(async()=>assert.equal(await diagrams.count(),1));
@@ -95,7 +112,7 @@ async function eventually(fn) { let last; for(let i=0;i<100;i++){try{return awai
   await eventually(async()=>assert.equal(await diagrams.getAttribute('aria-busy'),null));
   await page.screenshot({path:path.join(output,'state-dark.png')});
   assert.deepEqual(errors,[]); assert.deepEqual(external,[]);
-  const report = {status:'passed',checks:['流程图与时序图中文离线渲染','错误提示与修复','主题切换','点击和键盘编辑','保存撤销','阅读与源码模式','笔记切换异步清理','宽图横向滚动','源码方向键准确定位','原始状态图含中文与HTML换行'],pageErrors:errors,externalRequests:external};
+  const report = {status:'passed',checks:['流程图与时序图中文离线渲染','错误提示与修复','主题切换','点击和键盘编辑','保存撤销','阅读与源码模式','笔记切换异步清理','宽图横向滚动及深浅主题全宽背景','源码方向键准确定位','原始状态图含中文与HTML换行'],pageErrors:errors,externalRequests:external};
   await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2)); console.log(JSON.stringify(report));
   await app.close(); app=null;
 })().catch(async error => {console.error(error);if(app){try{await (await app.firstWindow()).screenshot({path:path.join(output,'failure.png')});}catch{}app.process().kill('SIGKILL');}process.exit(1);});

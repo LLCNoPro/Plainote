@@ -1,7 +1,5 @@
 import type { EditorState } from '@codemirror/state';
-import { EditorState as State, StateEffect, StateField, Facet } from '@codemirror/state';
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { normalizeDocument } from '../shared/raw-document.ts';
+import { StateEffect, StateField, Facet } from '@codemirror/state';
 import { findReferences, relativeLink, encodeMarkdownUrl, looksLikeExternalUrl } from '../shared/references.ts';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
@@ -64,13 +62,7 @@ export function fileCompletionSource(context: CompletionContext): CompletionResu
 }
 
 export interface PreviewRange { kind: 'line' | 'hide' | 'mark' | 'task' | 'code-label' | 'rule' | 'bullet' | 'table' | 'image' | 'mermaid'; from: number; to: number; className?: string; text?: string; target?: string; attributes?: Record<string, string> }
-export function extractHeadings(raw: string): { text: string; level: number; line: number }[] {
-  const state = State.create({ doc: normalizeDocument(raw), extensions: [markdown({ base: markdownLanguage })] });
-  return previewRanges(state, new Set()).filter(r => r.kind === 'line' && r.className?.startsWith('lp-heading-')).map(r => {
-    const line = state.doc.lineAt(r.from);
-    return { text: line.text.replace(/^\s*#{1,6}\s+/, '').replace(/\s+#+\s*$/, ''), level: Number(r.className!.at(-1)), line: line.number };
-  });
-}
+export { extractHeadings } from './outline.ts';
 export function previewRanges(state: EditorState, activeLines: Set<number>): PreviewRange[] {
   const result: PreviewRange[] = [];
   const frontmatter = state.doc.sliceString(0, Math.min(state.doc.length, 100000)).match(/^---\n[\s\S]*?\n---(?:\n|$)/)?.[0].length ?? 0;

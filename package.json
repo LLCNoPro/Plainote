@@ -18,6 +18,8 @@
     "test:markdown": "node tests/markdown-desktop.cjs",
     "test:mermaid": "node tests/mermaid-desktop.cjs",
     "test:docx": "node tests/docx-export-desktop.cjs",
+    "test:outline": "node tests/outline-desktop.cjs",
+    "test:panels": "node tests/panel-resize-desktop.cjs",
     "test:files": "node tests/file-management-desktop.cjs",
     "test:reading": "node tests/reading-desktop.cjs",
     "test:attachments": "node tests/attachments-desktop.cjs",
